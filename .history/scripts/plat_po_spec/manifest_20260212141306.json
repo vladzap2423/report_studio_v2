@@ -1,0 +1,21 @@
+{
+  "id": "plat_po_spec",
+  "title": "Отчет по платным услугам по пациентам(Наличные)",
+  "version": "1.0.0",
+  "description": "Группировка по профилю, ФИО, услугам и персоналу. Формирует Excel с двумя листами.",
+  "requiredColumns": [
+    { "key": "Код ОКМУ", "title": "Код ОКМУ", "type": "string", "required": true },
+    { "key": "Услуга", "title": "Услуга", "type": "string", "required": true },
+    { "key": "Сумма", "title": "Сумма", "type": "number", "required": true }
+  ],
+  "optionalColumns": [
+    { "key": "Вид поступления", "title": "Вид поступления", "type": "string" },
+    { "key": "Наименование специализации/профиля на текущую дату", "title": "Профиль", "type": "string" },
+    { "key": "Состояние", "title": "Состояние", "type": "string" },
+    { "key": "Дата", "title": "Дата", "type": "date" },
+    { "key": "ФИО", "title": "ФИО", "type": "string" },
+    { "key": "Специалист/Ресурс.Выполнение", "title": "Специалист/Ресурс.Выполнение", "type": "string" },
+    { "key": "Персонал. Дополнительный персонал/ресурсы", "title": "Доп. персонал/ресурсы", "type": "string" }
+  ],
+  "outputs": { "mode": "single", "format": "xlsx" }
+}

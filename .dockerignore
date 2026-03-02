@@ -1,0 +1,8 @@
+node_modules
+.next
+env
+.venv
+.git
+.history
+npm-debug.log
+*.log
