@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 
 type ScriptMeta = {
   id: string;
@@ -383,6 +384,12 @@ export default function HomePage() {
           >
             Загрузить скрипт
           </button>
+          <Link
+            href="/services"
+            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            Перейти к справочнику услуг
+          </Link>
         </div>
 
         {/* DROPZONE */}
