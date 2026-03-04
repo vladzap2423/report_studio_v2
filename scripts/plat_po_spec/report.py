@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Отчёт с группировкой по профилю ИЗ БАЗЫ data.db.
-Медикаменты и Профиль берутся из таблицы services по коду ОК МУ.
+ОТЧЁТ ДЛЯ plat_po_spec
+Медикаменты и Профиль берутся ИЗ БАЗЫ data.db
 """
 import argparse
 import os
@@ -13,18 +13,18 @@ from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
-# Путь к базе — относительно папки scripts/dogovor
+# ====================== ПУТЬ К БАЗЕ ======================
 DB_PATH = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # поднимаемся из dogovor → scripts
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data.db"
 ))
 
 SHEET_MEDCOM = "Медкомиссии"
 SHEET_OTHER = "Остальное"
 
-# Входные колонки из Excel
+# Входные колонки (точно как в твоём файле)
 VID_COL = "Вид поступления"
-VID_PROF = "профосмотр"  # нижний регистр для сравнения
+VID_PROF = "профосмотр"
 
 COL_CODE = "Код ОКМУ"
 COL_SERVICE = "Услуга"
@@ -37,16 +37,10 @@ COL_EXTRA = "Понятие dopPers"
 COL_TARPLAN = "Тар.план"
 COL_DOGOVOR = "Договор на оплату"
 
-# Выходные колонки (порядок)
+# Выходные колонки
 OUT_HEADERS = [
-    "ФИО",
-    "Услуга",
-    "Состояние",
-    "Дата",
-    "Количество услуг",
-    "Сумма по тарифу",
-    "Медикаменты",
-    "Сумма для распределения",
+    "ФИО", "Услуга", "Состояние", "Дата", "Количество услуг",
+    "Сумма по тарифу", "Медикаменты", "Сумма для распределения",
     "Специалист/Ресурс.Выполнение",
     "Персонал. Дополнительный персонал/ресурсы",
 ]
@@ -56,108 +50,92 @@ COL_WIDTHS = [34, 65, 20, 16, 16, 16, 22, 28, 34, 34]
 
 def get_db_connection():
     if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"База данных не найдена: {DB_PATH}\nПроверьте путь: {DB_PATH}")
+        raise FileNotFoundError(f"База не найдена: {DB_PATH}")
     return sqlite3.connect(DB_PATH)
 
 
-def load_db_maps() -> tuple[dict[str, float], dict[str, str]]:
-    """Загружает медикаменты и профили из data.db"""
+def load_db_maps():
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT "Код_ОК_МУ", "Медикаменты", "Профиль"
-        FROM services
-        WHERE "Код_ОК_МУ" IS NOT NULL AND "Код_ОК_МУ" != ''
-    """)
-    rows = cursor.fetchall()
+    cur = conn.cursor()
+    cur.execute('SELECT "Код_ОК_МУ", "Медикаменты", "Профиль" FROM services')
+    rows = cur.fetchall()
     conn.close()
 
-    meds_map = {}
-    profile_map = {}
-
-    for code, meds, prof in rows:
-        code_str = str(code).strip()
-        if code_str:
-            meds_map[code_str] = float(meds) if meds is not None else 0.0
-            profile_map[code_str] = str(prof).strip() if prof else "Без профиля"
-
-    return meds_map, profile_map
-
-
-def clean_text_series(s: pd.Series) -> pd.Series:
-    s = s.astype("string").str.strip()
-    s = s.replace({"nan": pd.NA, "None": pd.NA, "": pd.NA})
-    return s
-
-
-def normalize_str(x) -> str:
-    if pd.isna(x) or x is None:
-        return ""
-    return str(x).strip().lower()
+    meds = {}
+    prof = {}
+    for code, m, p in rows:
+        code = str(code).strip()
+        if code:
+            meds[code] = float(m) if m is not None else 0.0
+            prof[code] = str(p).strip() if p else "Без профиля"
+    return meds, prof
 
 
 def load_input(path: str) -> pd.DataFrame:
     wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb[wb.sheetnames[0]]
+    ws = wb.active
 
+    # Поиск заголовков
     header_row = None
-    for r in range(1, min(50, ws.max_row) + 1):
-        vals = [ws.cell(r, c).value for c in range(1, ws.max_column + 1)]
-        if any(v == COL_CODE for v in vals if v):
+    headers = []
+    for r in range(1, 30):
+        row_values = [str(ws.cell(r, c).value or "").strip() for c in range(1, ws.max_column + 1)]
+        if "Код ОКМУ" in row_values:
             header_row = r
+            headers = row_values
             break
 
     if header_row is None:
-        raise RuntimeError(f"Не найдена строка заголовков с колонкой '{COL_CODE}'")
+        raise RuntimeError("Не найдена строка с заголовком 'Код ОКМУ'")
 
-    headers = [ws.cell(header_row, c).value for c in range(1, ws.max_column + 1)]
+    print(f"Найдены заголовки в строке {header_row}")
+    print("Заголовки:", headers)
+
     data = []
     for r in range(header_row + 1, ws.max_row + 1):
-        row = {headers[c-1]: ws.cell(r, c).value for c in range(1, ws.max_column + 1)}
+        row = {headers[c-1]: ws.cell(r, c).value for c in range(1, len(headers)+1)}
         if all(v is None for v in row.values()):
             continue
         data.append(row)
 
-    wb.close()
-
     df = pd.DataFrame(data)
 
-    # Обязательные колонки
-    required = [COL_CODE, COL_SERVICE, COL_SUM]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"В файле отсутствуют обязательные столбцы: {', '.join(missing)}")
+    df[COL_SUM] = pd.to_numeric(df.get(COL_SUM), errors="coerce").fillna(0)
 
-    df[COL_SUM] = pd.to_numeric(df[COL_SUM], errors="coerce").fillna(0)
-
-    for col in [VID_COL, COL_FIO, COL_SERVICE, COL_CODE, COL_STATE,
-                COL_SPEC, COL_EXTRA, COL_TARPLAN, COL_DOGOVOR]:
+    for col in [VID_COL, COL_FIO, COL_SERVICE, COL_CODE, COL_STATE, COL_SPEC, COL_EXTRA]:
         if col in df.columns:
-            df[col] = clean_text_series(df[col])
+            df[col] = df[col].astype("string").str.strip().replace({"nan": None, "None": None, "": None})
 
     if COL_DATE in df.columns:
         df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors="coerce")
 
-    return df[df[COL_CODE].notna()].copy()
+    print(f"Загружено строк: {len(df)}")
+    return df
 
 
-def split_by_vid(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def split_by_vid(df):
     if VID_COL not in df.columns:
-        return df.iloc[0:0].copy(), df.copy()
-    vid_norm = df[VID_COL].apply(normalize_str)
-    return df[vid_norm == VID_PROF].copy(), df[vid_norm != VID_PROF].copy()
+        return df.iloc[0:0], df.copy()
+    return (df[df[VID_COL].str.lower().str.strip() == VID_PROF].copy(),
+            df[df[VID_COL].str.lower().str.strip() != VID_PROF].copy())
 
 
-def aggregate_for_patient_style(df: pd.DataFrame, meds_map: dict, profile_map: dict) -> pd.DataFrame:
+def aggregate_for_patient_style(df: pd.DataFrame, meds_map: dict, profile_map: dict):
     df = df.copy()
 
-    # Профиль берём из базы
+    # Заполняем пропуски заранее
+    df[COL_FIO] = df[COL_FIO].fillna("")
+    df[COL_SERVICE] = df[COL_SERVICE].fillna("")
+    df[COL_STATE] = df[COL_STATE].fillna("")
+    df[COL_SPEC] = df[COL_SPEC].fillna("")
+    df[COL_EXTRA] = df[COL_EXTRA].fillna("")
+    df[COL_DATE] = df[COL_DATE].fillna(pd.NaT)
+
     df["Профиль"] = df[COL_CODE].astype(str).str.strip().map(profile_map).fillna("Без профиля")
 
     g = df.groupby(
         ["Профиль", COL_FIO, COL_CODE, COL_SERVICE, COL_STATE, COL_DATE, COL_SPEC, COL_EXTRA],
-        as_index=False,
-        dropna=False
+        as_index=False, dropna=False
     ).agg(
         **{
             "Количество услуг": (COL_CODE, "size"),
@@ -165,9 +143,8 @@ def aggregate_for_patient_style(df: pd.DataFrame, meds_map: dict, profile_map: d
         }
     )
 
-    # Медикаменты из базы
-    per_service = g[COL_CODE].astype(str).str.strip().map(meds_map).fillna(0.0)
-    g["Медикаменты"] = (per_service * g["Количество услуг"]).round(2)
+    per_one = g[COL_CODE].astype(str).str.strip().map(meds_map).fillna(0.0)
+    g["Медикаменты"] = (per_one * g["Количество услуг"]).round(2)
     g["Сумма для распределения"] = (g["Сумма по тарифу"] - g["Медикаменты"]).round(2)
 
     out = pd.DataFrame({
@@ -188,83 +165,71 @@ def aggregate_for_patient_style(df: pd.DataFrame, meds_map: dict, profile_map: d
     return out
 
 
-def write_profile_header(ws, row_idx: int, profile_name: str, ncols: int) -> int:
-    title = (profile_name or "Без профиля").strip()
-    ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=ncols)
-    cell = ws.cell(row_idx, 1, value=title)
-    cell.font = Font(bold=True, size=14)
-    cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[row_idx].height = 28
-    return row_idx + 1
-
-
-def write_patient_like_sheet(ws, df_part: pd.DataFrame, meds_map: dict, profile_map: dict):
-    table_df = aggregate_for_patient_style(df_part, meds_map, profile_map)
+def write_patient_like_sheet(ws, df_part, meds_map, profile_map):
+    table = aggregate_for_patient_style(df_part, meds_map, profile_map)
     ncols = len(OUT_HEADERS)
+
+    # Защита от NA — заменяем на пустую строку
+    table = table.fillna("")
+    table = table.replace([None, pd.NA], "")
 
     # Заголовки
     for c, h in enumerate(OUT_HEADERS, 1):
-        cell = ws.cell(1, c, value=h)
+        cell = ws.cell(1, c, h)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     r = 2
-    for profile, df_prof in table_df.groupby("Профиль", sort=False):
-        r = write_profile_header(ws, r, profile, ncols)
+    for profile, group in table.groupby("Профиль", sort=False):
+        # Заголовок профиля
+        ws.merge_cells(
+            start_row=r,
+            start_column=1,
+            end_row=r,
+            end_column=ncols
+        )
+        cell = ws.cell(r, 1, profile or "Без профиля")
+        cell.font = Font(bold=True, size=14)
+        cell.alignment = Alignment(horizontal="center")
+        r += 1
 
-        for _, row in df_prof.iterrows():
+        for _, row in group.iterrows():
             values = [
                 row["ФИО"],
                 row["Услуга"],
                 row["Состояние"],
                 row["Дата"],
-                int(row["Количество услуг"]),
-                float(row["Сумма по тарифу"]),
-                float(row["Медикаменты"]),
-                float(row["Сумма для распределения"]),
+                int(row["Количество услуг"]) if row["Количество услуг"] else 0,
+                float(row["Сумма по тарифу"]) if row["Сумма по тарифу"] else 0.0,
+                float(row["Медикаменты"]) if row["Медикаменты"] else 0.0,
+                float(row["Сумма для распределения"]) if row["Сумма для распределения"] else 0.0,
                 row["Специалист/Ресурс.Выполнение"],
-                row["Персонал. Дополнительный персонал/ресурсы"],
+                row["Персонал. Дополнительный персонал/ресурсы"]
             ]
-
             for c, v in enumerate(values, 1):
-                cell = ws.cell(r, c, value=v)
+                cell = ws.cell(r, c, v)
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
-                if c == 4:   # Дата
+                if c == 4 and v:  # Дата
                     cell.number_format = "dd.mm.yyyy"
-                if c == 5:   # Кол-во
-                    cell.number_format = "0"
-                if c in (6,7,8):  # суммы
-                    cell.number_format = "0.00"
+                if c == 5: cell.number_format = "0"
+                if c in (6, 7, 8): cell.number_format = "0.00"
             r += 1
 
-    # Итоги
-    total_qty = int(table_df["Количество услуг"].sum()) if not table_df.empty else 0
-    total_sum = float(table_df["Сумма по тарифу"].sum()) if not table_df.empty else 0.0
-    total_meds = float(table_df["Медикаменты"].sum()) if not table_df.empty else 0.0
-    total_dist = float(table_df["Сумма для распределения"].sum()) if not table_df.empty else 0.0
-
+    # Итог
+    r += 1
     ws.cell(r, 1, "ИТОГО").font = Font(bold=True)
-    ws.cell(r, 5, total_qty).font = Font(bold=True)
-    ws.cell(r, 6, round(total_sum, 2)).font = Font(bold=True)
-    ws.cell(r, 7, round(total_meds, 2)).font = Font(bold=True)
-    ws.cell(r, 8, round(total_dist, 2)).font = Font(bold=True)
+    ws.cell(r, 5, int(table["Количество услуг"].sum() or 0)).font = Font(bold=True)
+    ws.cell(r, 6, round(table["Сумма по тарифу"].sum() or 0, 2)).font = Font(bold=True)
+    ws.cell(r, 7, round(table["Медикаменты"].sum() or 0, 2)).font = Font(bold=True)
+    ws.cell(r, 8, round(table["Сумма для распределения"].sum() or 0, 2)).font = Font(bold=True)
 
-    for c in range(1, ncols + 1):
-        ws.cell(r, c).alignment = Alignment(vertical="top", wrap_text=True)
-
-    # Границы и формат
-    thin = Side(style="thin")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for rr in range(1, r + 1):
-        for cc in range(1, ncols + 1):
-            ws.cell(rr, cc).border = border
-
+    # Форматирование
     for i, w in enumerate(COL_WIDTHS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A2"
 
 
-def build_report(df: pd.DataFrame, output_path: str) -> None:
+def build_report(df: pd.DataFrame, output_path: str):
     meds_map, profile_map = load_db_maps()
 
     df_prof, df_other = split_by_vid(df)
@@ -272,24 +237,21 @@ def build_report(df: pd.DataFrame, output_path: str) -> None:
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
-    ws_med = wb.create_sheet(title=SHEET_MEDCOM)
-    write_patient_like_sheet(ws_med, df_prof, meds_map, profile_map)
-
-    ws_other = wb.create_sheet(title=SHEET_OTHER)
-    write_patient_like_sheet(ws_other, df_other, meds_map, profile_map)
+    write_patient_like_sheet(wb.create_sheet(SHEET_MEDCOM), df_prof, meds_map, profile_map)
+    write_patient_like_sheet(wb.create_sheet(SHEET_OTHER), df_other, meds_map, profile_map)
 
     wb.save(output_path)
+    print(f"Отчёт успешно сохранён: {output_path}")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="Входной файл xlsx")
-    ap.add_argument("--output", required=True, help="Выходной файл xlsx")
+    ap.add_argument("--input", required=True)
+    ap.add_argument("--output", required=True)
     args = ap.parse_args()
 
     df = load_input(args.input)
     build_report(df, args.output)
-    print(f"Отчёт сохранён: {args.output}")
 
 
 if __name__ == "__main__":
