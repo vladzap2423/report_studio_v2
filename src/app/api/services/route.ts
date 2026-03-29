@@ -1,64 +1,103 @@
-// app/api/services/route.ts
-import { db } from "@/lib/db";
-import { NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { dbQuery } from "@/lib/db";
+import { requireApiRole } from "@/lib/require-api-role";
 
-export async function GET() {
-    try {
-        const services = db
-            .prepare(`
-        SELECT 
-          ID,
-          "Код_прайса"     AS price_code,
-          "Услуга_прайса"  AS price_service,
-          "Код_ОК_МУ"      AS okmu_code,
-          "Услуга_ОК_МУ"   AS okmu_service,
-          Медикаменты      AS medicaments,
-          Профиль          AS profile
+type ServiceRow = {
+  id: number;
+  code: string | null;
+  name: string | null;
+  med: number;
+  profile: string | null;
+};
+
+const editableColumns = {
+  code: "code",
+  name: "name",
+  med: "med",
+  profile: "profile",
+} as const;
+
+export async function GET(request: NextRequest) {
+  const auth = await requireApiRole(request, "admin");
+  if (auth.response) return auth.response;
+
+  try {
+    const url = new URL(request.url);
+    const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10));
+    const rawLimit = Number.parseInt(url.searchParams.get("limit") || "500", 10);
+    const limit = Math.min(Math.max(rawLimit, 1), 2000);
+    const offset = (page - 1) * limit;
+
+    const servicesRes = await dbQuery<ServiceRow>(
+      `
+        SELECT id, code, name, med, profile
         FROM services
-        ORDER BY ID
-      `)
-            .all();
+        ORDER BY id
+        LIMIT $1 OFFSET $2
+      `,
+      [limit, offset]
+    );
 
-        return NextResponse.json(services);
-    } catch (err) {
-        console.error(err);
-        return NextResponse.json({ error: "Ошибка загрузки" }, { status: 500 });
-    }
+    const totalRes = await dbQuery<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM services`
+    );
+
+    return NextResponse.json({
+      services: servicesRes.rows,
+      total: Number(totalRes.rows[0]?.count || "0"),
+    });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: "Failed to load services" }, { status: 500 });
+  }
 }
 
-export async function PUT(request: Request) {
-    try {
-        const { id, field, value } = await request.json();
+export async function PUT(request: NextRequest) {
+  const auth = await requireApiRole(request, "admin");
+  if (auth.response) return auth.response;
 
-        if (!id || !field) {
-            return NextResponse.json({ error: "Нужны id и field" }, { status: 400 });
-        }
+  try {
+    const body = await request.json();
+    const id = Number(body?.id);
+    const field = String(body?.field || "") as keyof typeof editableColumns;
 
-        const allowedFields: Record<string, string> = {
-            price_code: "Код_прайса",
-            price_service: "Услуга_прайса",
-            okmu_code: "Код_ОК_МУ",
-            okmu_service: "Услуга_ОК_МУ",
-            medicaments: "Медикаменты",
-            profile: "Профиль",
-        };
-
-        const dbField = allowedFields[field];
-        if (!dbField) {
-            return NextResponse.json({ error: "Недопустимое поле" }, { status: 400 });
-        }
-
-        const stmt = db.prepare(`
-      UPDATE services
-      SET "${dbField}" = ?
-      WHERE ID = ?
-    `);
-
-        const info = stmt.run(value, id);
-
-        return NextResponse.json({ success: info.changes > 0 });
-    } catch (err) {
-        console.error(err);
-        return NextResponse.json({ error: "Ошибка сохранения" }, { status: 500 });
+    if (!Number.isFinite(id) || !editableColumns[field]) {
+      return NextResponse.json({ error: "id and field are required" }, { status: 400 });
     }
+
+    let value: string | number | null = body?.value ?? null;
+    if (field === "med") {
+      const numeric = Number(value);
+      value = Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
+    } else {
+      const normalized = String(value ?? "").trim();
+      value = normalized || null;
+    }
+
+    if (field === "profile" && value) {
+      await dbQuery(
+        `
+          INSERT INTO profiles(name)
+          VALUES ($1)
+          ON CONFLICT (name) DO NOTHING
+        `,
+        [value]
+      );
+    }
+
+    const column = editableColumns[field];
+    const updateRes = await dbQuery(
+      `
+        UPDATE services
+        SET ${column} = $1
+        WHERE id = $2
+      `,
+      [value, id]
+    );
+
+    return NextResponse.json({ success: (updateRes.rowCount || 0) > 0 });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: "Failed to save service" }, { status: 500 });
+  }
 }

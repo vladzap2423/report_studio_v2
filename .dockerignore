@@ -6,3 +6,4 @@ env
 .history
 npm-debug.log
 *.log
+*.tar

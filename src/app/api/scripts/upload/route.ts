@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { requireApiRole } from "@/lib/require-api-role";
 
 export const runtime = "nodejs";
 
@@ -26,16 +27,14 @@ async function exists(p: string) {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const auth = await requireApiRole(req, "admin");
+  if (auth.response) return auth.response;
+
   const form = await req.formData();
-  const password = String(form.get("password") || "");
   const scriptIdRaw = String(form.get("scriptId") || "");
   const scriptId = normalizeScriptId(scriptIdRaw);
   const overwrite = String(form.get("overwrite") || "") === "1";
-
-  if (password !== "Zx44tfW") {
-    return NextResponse.json({ error: "invalid password" }, { status: 403 });
-  }
 
   if (!scriptId) {
     return NextResponse.json({ error: "scriptId is required" }, { status: 400 });
@@ -51,10 +50,7 @@ export async function POST(req: Request) {
 
   if (await exists(scriptDir)) {
     if (!overwrite) {
-      return NextResponse.json(
-        { error: "script already exists" },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: "script already exists" }, { status: 409 });
     }
     await fs.rm(scriptDir, { recursive: true, force: true });
   }
@@ -64,20 +60,17 @@ export async function POST(req: Request) {
   for (const file of files) {
     const rel = safeRelativePath(file.name);
     if (!rel) {
-      return NextResponse.json(
-        { error: "invalid file path" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "invalid file path" }, { status: 400 });
     }
+
     const targetPath = path.join(scriptDir, rel);
     const resolvedTarget = path.resolve(targetPath);
     const resolvedRoot = path.resolve(scriptDir) + path.sep;
+
     if (!resolvedTarget.startsWith(resolvedRoot)) {
-      return NextResponse.json(
-        { error: "invalid file path" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "invalid file path" }, { status: 400 });
     }
+
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
     const buf = Buffer.from(await file.arrayBuffer());
     await fs.writeFile(targetPath, buf);

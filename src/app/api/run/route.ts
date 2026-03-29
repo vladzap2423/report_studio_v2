@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
@@ -69,12 +69,13 @@ function contentTypeFor(fmt: "xlsx" | "zip") {
     : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const form = await req.formData();
 
   const scriptIdRaw = String(form.get("scriptId") || "");
   const scriptId = normalizeScriptId(scriptIdRaw);
-  const file = form.get("files");
+  const first = form.getAll("files")[0];
+  const file = first instanceof File ? first : form.get("files");
 
   if (!scriptId) {
     return NextResponse.json({ error: "scriptId is required" }, { status: 400 });

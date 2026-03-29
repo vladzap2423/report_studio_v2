@@ -1,12 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs/promises";
+import { requireApiRole } from "@/lib/require-api-role";
 
 export const runtime = "nodejs";
 
 const INSTRUCTION_FILES = ["instruction.txt"];
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const auth = await requireApiRole(request, "user");
+  if (auth.response) return auth.response;
+
   const { searchParams } = new URL(request.url);
   const scriptId = searchParams.get("scriptId");
 

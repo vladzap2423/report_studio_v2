@@ -42,3 +42,5 @@ next-env.d.ts
 
 *.tar
 *.tar.gz
+
+certificates
