@@ -8,7 +8,7 @@ function requiredRoleForPath(pathname: string): UserRole | null {
     pathname.startsWith("/api/services") ||
     pathname.startsWith("/api/profiles") ||
     pathname.startsWith("/api/users") ||
-    pathname.startsWith("/api/scripts/upload")
+    pathname.startsWith("/api/reports/upload")
   ) {
     return "admin";
   }
@@ -20,8 +20,8 @@ function isPublicPath(pathname: string) {
   return (
     pathname === "/" ||
     pathname === "/login" ||
-    pathname === "/api/scripts" ||
-    pathname === "/api/run" ||
+    pathname === "/api/reports" ||
+    pathname === "/api/reports/run" ||
     pathname.startsWith("/api/auth/login")
   );
 }

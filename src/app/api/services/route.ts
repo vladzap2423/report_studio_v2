@@ -101,3 +101,28 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Failed to save service" }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  const auth = await requireApiRole(request, "admin");
+  if (auth.response) return auth.response;
+
+  try {
+    const id = Number(new URL(request.url).searchParams.get("id"));
+    if (!Number.isFinite(id)) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    const result = await dbQuery(
+      `
+        DELETE FROM services
+        WHERE id = $1
+      `,
+      [id]
+    );
+
+    return NextResponse.json({ success: (result.rowCount || 0) > 0 });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: "Failed to delete service" }, { status: 500 });
+  }
+}

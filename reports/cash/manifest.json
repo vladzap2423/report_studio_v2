@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Группировка по профилю, ФИО, услугам и персоналу. Формирует Excel с двумя листами.",
   "requiredColumns": [
-    { "key": "Код ОКМУ", "title": "Код ОКМУ", "type": "string", "required": true },
+    { "key": "Код услуги по прайсу на дату qMS", "title": "Код услуги по прайсу на дату qMS", "type": "string", "required": true },
     { "key": "Услуга", "title": "Услуга", "type": "string", "required": true },
     { "key": "Сумма", "title": "Сумма", "type": "number", "required": true }
   ],

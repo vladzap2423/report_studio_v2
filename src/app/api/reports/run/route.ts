@@ -1,15 +1,28 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { dbQuery, ensureDatabaseReady } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-function runProcess(cmd: string, args: string[], cwd?: string) {
+type ServiceLookupRow = {
+  code: string | null;
+  med: number;
+  profile: string | null;
+};
+
+function runProcess(
+  cmd: string,
+  args: string[],
+  cwd?: string,
+  env?: NodeJS.ProcessEnv
+) {
   return new Promise<void>((resolve, reject) => {
     const p = spawn(cmd, args, {
       cwd,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -38,7 +51,7 @@ async function exists(p: string) {
   }
 }
 
-function normalizeScriptId(raw: string) {
+function normalizeReportId(raw: string) {
   // только безопасные символы в имени папки/файла
   const s = String(raw || "").trim();
   const cleaned = s.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -51,8 +64,8 @@ function getPythonPath() {
   return { win, nix };
 }
 
-async function readOutputFormat(scriptDir: string): Promise<"xlsx" | "zip"> {
-  const manifestPath = path.join(scriptDir, "manifest.json");
+async function readOutputFormat(reportDir: string): Promise<"xlsx" | "zip"> {
+  const manifestPath = path.join(reportDir, "manifest.json");
   try {
     const raw = await fs.readFile(manifestPath, "utf8");
     const m = JSON.parse(raw);
@@ -69,42 +82,65 @@ function contentTypeFor(fmt: "xlsx" | "zip") {
     : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 }
 
+async function writeServicesLookup(outputPath: string) {
+  await ensureDatabaseReady();
+
+  const result = await dbQuery<ServiceLookupRow>(
+    `
+      SELECT code, med, profile
+      FROM services
+      WHERE code IS NOT NULL
+        AND btrim(code) <> ''
+    `
+  );
+
+  const services = result.rows.map((row) => ({
+    code: String(row.code ?? "").trim(),
+    med: Number(row.med ?? 0),
+    profile: row.profile ? String(row.profile).trim() : "",
+  }));
+
+  await fs.writeFile(outputPath, JSON.stringify({ services }, null, 2), "utf8");
+}
+
 export async function POST(req: NextRequest) {
   const form = await req.formData();
 
-  const scriptIdRaw = String(form.get("scriptId") || "");
-  const scriptId = normalizeScriptId(scriptIdRaw);
+  const reportIdRaw = String(form.get("reportId") || "");
+  const reportId = normalizeReportId(reportIdRaw);
   const first = form.getAll("files")[0];
   const file = first instanceof File ? first : form.get("files");
 
-  if (!scriptId) {
-    return NextResponse.json({ error: "scriptId is required" }, { status: 400 });
+  if (!reportId) {
+    return NextResponse.json({ error: "reportId is required" }, { status: 400 });
   }
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "file is required" }, { status: 400 });
   }
 
-  const scriptsRoot = path.join(process.cwd(), "scripts");
-  const scriptDir = path.join(scriptsRoot, scriptId);
-  const pyPath = path.join(scriptDir, "report.py");
+  const reportsRoot = path.join(process.cwd(), "reports");
+  const reportDir = path.join(reportsRoot, reportId);
+  const pyPath = path.join(reportDir, "report.py");
 
   if (!(await exists(pyPath))) {
     return NextResponse.json(
-      { error: `report.py not found in plugin: ${scriptId}` },
+      { error: `report.py not found in report: ${reportId}` },
       { status: 404 }
     );
   }
 
-  const outFormat = await readOutputFormat(scriptDir); // всегда "xlsx" | "zip"
+  const outFormat = await readOutputFormat(reportDir);
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "reports-"));
   const inputPath = path.join(tmpDir, "input" + path.extname(file.name || ".xlsx"));
-  const outFileName = `${scriptId}.${outFormat}`;
+  const outFileName = `${reportId}.${outFormat}`;
   const outputPath = path.join(tmpDir, outFileName);
+  const servicesLookupPath = path.join(tmpDir, "services.lookup.json");
 
   try {
     const buf = Buffer.from(await file.arrayBuffer());
     await fs.writeFile(inputPath, buf);
+    await writeServicesLookup(servicesLookupPath);
 
     const { win, nix } = getPythonPath();
     let pythonCmd = "python";
@@ -114,12 +150,16 @@ export async function POST(req: NextRequest) {
     await runProcess(
       pythonCmd,
       [pyPath, "--input", inputPath, "--output", outputPath],
-      scriptDir
+      reportDir,
+      {
+        ...process.env,
+        REPORT_SERVICES_PATH: servicesLookupPath,
+      }
     );
 
     if (!(await exists(outputPath))) {
       return NextResponse.json(
-        { error: `Plugin finished but output not found: ${outFileName}` },
+        { error: `Report finished but output not found: ${outFileName}` },
         { status: 500 }
       );
     }

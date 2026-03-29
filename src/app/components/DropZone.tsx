@@ -78,7 +78,7 @@ export default function DropZone({ accept = ".csv,.xlsx,.xls", onFilesPicked }: 
         }}
         onDrop={onDrop}
         className={`
-          relative flex min-h-[360px] flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-12 transition-all duration-300
+          relative flex min-h-90 flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-12 transition-all duration-300
           ${
             isDragging
               ? "border-emerald-400 bg-white/20 shadow-lg"

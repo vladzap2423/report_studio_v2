@@ -12,20 +12,20 @@ export async function GET(request: NextRequest) {
   if (auth.response) return auth.response;
 
   const { searchParams } = new URL(request.url);
-  const scriptId = searchParams.get("scriptId");
+  const reportId = searchParams.get("reportId");
 
-  if (!scriptId) {
-    return NextResponse.json({ error: "Missing scriptId" }, { status: 400 });
+  if (!reportId) {
+    return NextResponse.json({ error: "Missing reportId" }, { status: 400 });
   }
 
-  const safeId = path.basename(scriptId);
-  if (safeId !== scriptId) {
-    return NextResponse.json({ error: "Invalid scriptId" }, { status: 400 });
+  const safeId = path.basename(reportId);
+  if (safeId !== reportId) {
+    return NextResponse.json({ error: "Invalid reportId" }, { status: 400 });
   }
 
-  const scriptsRoot = path.join(process.cwd(), "scripts");
+  const reportsRoot = path.join(process.cwd(), "reports");
   for (const filename of INSTRUCTION_FILES) {
-    const filePath = path.join(scriptsRoot, scriptId, filename);
+    const filePath = path.join(reportsRoot, reportId, filename);
     try {
       const content = await fs.readFile(filePath, "utf-8");
       return NextResponse.json({ content, filename });

@@ -7,7 +7,7 @@ type UploadFile = {
   relativePath: string;
 };
 
-export default function ScriptUploadPanel() {
+export default function ReportUploadPanel() {
   const [id, setId] = useState("");
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [overwrite, setOverwrite] = useState(false);
@@ -40,34 +40,34 @@ export default function ScriptUploadPanel() {
     inputRef.current?.click();
   }, []);
 
-  const uploadScripts = useCallback(async () => {
+  const uploadReports = useCallback(async () => {
     setError(null);
     setSuccess(null);
 
-    if (!files.length) return setError("Выберите файлы скрипта.");
-    if (!id.trim()) return setError("Укажите ID скрипта.");
+    if (!files.length) return setError("Выберите файлы отчета.");
+    if (!id.trim()) return setError("Укажите ID отчета.");
 
     setLoading(true);
     try {
       const fd = new FormData();
-      fd.append("scriptId", id.trim());
+      fd.append("reportId", id.trim());
       if (overwrite) fd.append("overwrite", "1");
       for (const item of files) {
         fd.append("files", item.file, item.relativePath);
       }
 
-      const res = await fetch("/api/scripts/upload", { method: "POST", body: fd });
+      const res = await fetch("/api/reports/upload", { method: "POST", body: fd });
       if (!res.ok) {
         const msg = await res.text();
         throw new Error(msg || `HTTP ${res.status}`);
       }
 
-      setSuccess("Скрипт загружен.");
+      setSuccess("Отчет загружен.");
       setFiles([]);
       setId("");
       if (inputRef.current) inputRef.current.value = "";
     } catch {
-      setError("Не удалось загрузить скрипт.");
+      setError("Не удалось загрузить отчет.");
     } finally {
       setLoading(false);
     }
@@ -87,17 +87,19 @@ export default function ScriptUploadPanel() {
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mx-auto flex min-h-full w-full max-w-3xl items-center justify-center">
-        <div className="w-full rounded-3xl border border-slate-200 bg-gradient-to-b from-slate-50/90 to-white/70 p-6 shadow-sm sm:p-8">
+        <div className="w-full rounded-3xl border border-slate-200 bg-linear-to-b from-slate-50/90 to-white/70 p-6 shadow-sm sm:p-8">
           <div className="mb-6 text-center">
-            <h2 className="text-2xl font-semibold text-slate-900">Загрузка скрипта</h2>
+            <h2 className="text-2xl font-semibold text-slate-900">Загрузка отчета</h2>
             <p className="mt-2 text-sm text-slate-600">
-              Укажите ID, выберите файлы папки скрипта и загрузите в систему
+              Укажите ID, выберите файлы папки отчета и загрузите в систему
             </p>
           </div>
 
           <div className="space-y-5">
             <div className="space-y-2">
-              <label className="block text-center text-sm font-medium text-slate-700">ID скрипта</label>
+              <label className="block text-center text-sm font-medium text-slate-700">
+                ID отчета
+              </label>
               <input
                 type="text"
                 value={id}
@@ -127,11 +129,14 @@ export default function ScriptUploadPanel() {
               }`}
             >
               <div className="text-center text-sm text-slate-600">
-                Файлы: <span className="font-medium text-slate-900">{files.length ? `${files.length} шт.` : "не выбраны"}</span>
+                Файлы:{" "}
+                <span className="font-medium text-slate-900">
+                  {files.length ? `${files.length} шт.` : "не выбраны"}
+                </span>
               </div>
 
               <p className="mt-2 text-center text-xs text-slate-500">
-                Перетащите папку/файлы сюда или выберите через кнопку
+                Перетащите папку или файлы сюда, либо выберите через кнопку
               </p>
 
               <div className="mt-3 flex justify-center">
@@ -186,7 +191,7 @@ export default function ScriptUploadPanel() {
           <div className="mt-6 flex justify-center">
             <button
               type="button"
-              onClick={uploadScripts}
+              onClick={uploadReports}
               disabled={loading}
               className="rounded-2xl bg-slate-900 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
             >

@@ -12,8 +12,12 @@ type Service = {
 };
 
 export default function ServicesAdminPanel() {
+  const servicesGridClass =
+    "grid grid-cols-[minmax(120px,1fr)_minmax(420px,4fr)_minmax(110px,0.8fr)_minmax(220px,1.6fr)_110px] gap-2";
+
   const [services, setServices] = useState<Service[]>([]);
   const [profiles, setProfiles] = useState<string[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [importLoading, setImportLoading] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
@@ -128,6 +132,25 @@ export default function ServicesAdminPanel() {
     event.target.value = "";
   };
 
+  const deleteService = async (id: number) => {
+    if (!confirm("Удалить услугу?")) return;
+
+    try {
+      const res = await fetch(`/api/services?id=${id}`, {
+        method: "DELETE",
+      });
+
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) {
+        throw new Error(body?.error || "Не удалось удалить услугу");
+      }
+
+      setServices((prev) => prev.filter((item) => item.id !== id));
+    } catch (error: any) {
+      alert(error?.message || "Не удалось удалить услугу");
+    }
+  };
+
   const rowVirtualizer = useVirtualizer({
     count: services.length,
     getScrollElement: () => parentRef.current,
@@ -140,6 +163,15 @@ export default function ServicesAdminPanel() {
       {loading && <div className="mb-4 text-sm text-gray-500">Загрузка данных...</div>}
 
       <div className="mb-5 flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setIsEditing((prev) => !prev)}
+          className={`rounded-2xl px-4 py-1.5 text-sm font-medium text-white ${
+            isEditing ? "bg-amber-600 hover:bg-amber-500" : "bg-slate-900 hover:bg-slate-800"
+          }`}
+        >
+          {isEditing ? "Редактирование включено" : "Редактировать"}
+        </button>
         <button
           type="button"
           disabled={importLoading}
@@ -176,11 +208,12 @@ export default function ServicesAdminPanel() {
         </div>
       )}
 
-      <div className="grid grid-cols-[120px_560px_110px_240px] gap-2 rounded-t-lg border border-gray-200 bg-gray-50/90 px-2 py-1 font-medium text-gray-600">
+      <div className={`${servicesGridClass} rounded-t-lg border border-gray-200 bg-gray-50/90 px-2 py-1 font-medium text-gray-600`}>
         <div>Код услуги</div>
         <div>Название услуги</div>
         <div className="text-center">Медикоменты</div>
         <div>Профиль</div>
+        <div className="text-center">Действия</div>
       </div>
 
       <div
@@ -201,32 +234,36 @@ export default function ServicesAdminPanel() {
                   height: virtualRow.size,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                className="grid grid-cols-[120px_560px_110px_240px] items-center gap-2 border-b border-gray-200 bg-gray-50/70 px-2 hover:bg-gray-50"
+                className={`${servicesGridClass} items-center border-b border-gray-200 bg-gray-50/70 px-2 hover:bg-gray-50`}
               >
                 <input
                   defaultValue={item.code ?? ""}
+                  disabled={!isEditing}
                   onBlur={(e) => saveField(item.id, "code", e.target.value)}
-                  className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm focus:border-blue-400 focus:bg-white/80 focus:outline-none"
+                  className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm focus:border-blue-400 focus:bg-white/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 />
 
                 <input
                   defaultValue={item.name ?? ""}
+                  disabled={!isEditing}
                   onBlur={(e) => saveField(item.id, "name", e.target.value)}
-                  className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm focus:border-blue-400 focus:bg-white/80 focus:outline-none"
+                  className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm focus:border-blue-400 focus:bg-white/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 />
 
                 <input
                   type="number"
                   min={0}
                   defaultValue={item.med ?? 0}
+                  disabled={!isEditing}
                   onBlur={(e) => saveField(item.id, "med", Number(e.target.value) || 0)}
-                  className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-center text-sm focus:border-blue-400 focus:bg-white/80 focus:outline-none"
+                  className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-center text-sm focus:border-blue-400 focus:bg-white/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 />
 
                 <select
                   defaultValue={item.profile ?? ""}
+                  disabled={!isEditing}
                   onChange={(e) => saveField(item.id, "profile", e.target.value)}
-                  className="w-full rounded border border-transparent bg-white/70 px-1.5 py-0.5 text-sm focus:border-blue-400 focus:outline-none"
+                  className="w-full rounded border border-transparent bg-white/70 px-1.5 py-0.5 text-sm focus:border-blue-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <option value="">— не выбран —</option>
                   {profiles.map((p) => (
@@ -235,6 +272,17 @@ export default function ServicesAdminPanel() {
                     </option>
                   ))}
                 </select>
+
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    disabled={!isEditing}
+                    onClick={() => deleteService(item.id)}
+                    className="rounded-lg border border-rose-300 px-3 py-1 text-sm text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Удалить
+                  </button>
+                </div>
               </div>
             );
           })}

@@ -5,7 +5,7 @@ import { requireApiRole } from "@/lib/require-api-role";
 
 export const runtime = "nodejs";
 
-function normalizeScriptId(raw: string) {
+function normalizeReportId(raw: string) {
   const s = String(raw || "").trim();
   return s.replace(/[^a-zA-Z0-9_-]/g, "");
 }
@@ -32,12 +32,12 @@ export async function POST(req: NextRequest) {
   if (auth.response) return auth.response;
 
   const form = await req.formData();
-  const scriptIdRaw = String(form.get("scriptId") || "");
-  const scriptId = normalizeScriptId(scriptIdRaw);
+  const reportIdRaw = String(form.get("reportId") || "");
+  const reportId = normalizeReportId(reportIdRaw);
   const overwrite = String(form.get("overwrite") || "") === "1";
 
-  if (!scriptId) {
-    return NextResponse.json({ error: "scriptId is required" }, { status: 400 });
+  if (!reportId) {
+    return NextResponse.json({ error: "reportId is required" }, { status: 400 });
   }
 
   const files = form.getAll("files").filter((f) => f instanceof File) as File[];
@@ -45,17 +45,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "files are required" }, { status: 400 });
   }
 
-  const scriptsRoot = path.join(process.cwd(), "scripts");
-  const scriptDir = path.join(scriptsRoot, scriptId);
+  const reportsRoot = path.join(process.cwd(), "reports");
+  const reportDir = path.join(reportsRoot, reportId);
 
-  if (await exists(scriptDir)) {
+  if (await exists(reportDir)) {
     if (!overwrite) {
-      return NextResponse.json({ error: "script already exists" }, { status: 409 });
+      return NextResponse.json({ error: "report already exists" }, { status: 409 });
     }
-    await fs.rm(scriptDir, { recursive: true, force: true });
+    await fs.rm(reportDir, { recursive: true, force: true });
   }
 
-  await fs.mkdir(scriptDir, { recursive: true });
+  await fs.mkdir(reportDir, { recursive: true });
 
   for (const file of files) {
     const rel = safeRelativePath(file.name);
@@ -63,9 +63,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "invalid file path" }, { status: 400 });
     }
 
-    const targetPath = path.join(scriptDir, rel);
+    const targetPath = path.join(reportDir, rel);
     const resolvedTarget = path.resolve(targetPath);
-    const resolvedRoot = path.resolve(scriptDir) + path.sep;
+    const resolvedRoot = path.resolve(reportDir) + path.sep;
 
     if (!resolvedTarget.startsWith(resolvedRoot)) {
       return NextResponse.json({ error: "invalid file path" }, { status: 400 });
@@ -76,5 +76,5 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(targetPath, buf);
   }
 
-  return NextResponse.json({ ok: true, scriptId });
+  return NextResponse.json({ ok: true, reportId });
 }

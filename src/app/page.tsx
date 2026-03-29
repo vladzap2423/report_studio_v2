@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import DropZone from "./components/DropZone";
-import ScriptsList from "./components/ScriptsList";
+import ReportsList from "./components/ReportsList";
 
 export default function HomePage() {
   const [files, setFiles] = useState<File[]>([]);
@@ -30,7 +30,7 @@ export default function HomePage() {
           >
             Загрузить новый файл
           </button>
-          <ScriptsList files={files} />
+          <ReportsList files={files} />
         </>
       )}
     </div>

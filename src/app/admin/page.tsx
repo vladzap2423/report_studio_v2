@@ -5,24 +5,24 @@ import { useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import ServicesAdminPanel from "./components/ServicesAdminPanel";
 import ProfilesAdminPanel from "./components/ProfilesAdminPanel";
-import ScriptUploadPanel from "./components/ScriptUploadPanel";
+import ReportUploadPanel from "./components/ReportUploadPanel";
 import UsersAdminPanel from "./components/UsersAdminPanel";
 import PasswordPadAdminPage from "./components/PasswordPadAdminPage";
 
-type Section = "services" | "profiles" | "scripts" | "users" | "arduino";
+type Section = "services" | "profiles" | "reports" | "users" | "arduino";
 
 const sections: { id: Section; label: string }[] = [
   { id: "services", label: "Справочник услуг" },
   { id: "profiles", label: "Профили" },
   { id: "users", label: "Пользователи" },
-  { id: "scripts", label: "Загрузка скриптов" },
+  { id: "reports", label: "Загрузка отчетов" },
   { id: "arduino", label: "Ардуино" }
 ];
 
 function normalizeSection(input: string | null): Section {
   if (input === "profiles") return "profiles";
   if (input === "users") return "users";
-  if (input === "scripts") return "scripts";
+  if (input === "reports") return "reports";
   if (input === "arduino") return "arduino";
   return "services";
 }
@@ -60,7 +60,7 @@ export default function AdminPage() {
         {section === "services" && <ServicesAdminPanel />}
         {section === "profiles" && <ProfilesAdminPanel />}
         {section === "users" && <UsersAdminPanel />}
-        {section === "scripts" && <ScriptUploadPanel />}
+        {section === "reports" && <ReportUploadPanel />}
         {section === "arduino" && <PasswordPadAdminPage />}
       </section>
     </main>
