@@ -44,3 +44,6 @@ next-env.d.ts
 *.tar.gz
 
 certificates
+
+# local database dumps
+dumps/

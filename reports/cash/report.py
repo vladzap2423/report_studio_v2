@@ -30,7 +30,7 @@ COL_STATE = "Состояние"
 COL_DATE = "Дата"
 COL_SUM = "Сумма"
 COL_FIO = "ФИО"
-COL_SPEC = "Специалист/Ресурс.Выполнение"
+COL_SPEC = "ФИО Специалиста"
 COL_EXTRA = "Средний мед.персонал"
 COL_TARPLAN = "Тар.план"
 COL_DOGOVOR = "Договор на оплату"
@@ -39,11 +39,13 @@ COL_DOGOVOR = "Договор на оплату"
 OUT_HEADERS = [
     "ФИО", "Услуга", "Код услуги по фед.номенклатуре", "Состояние", "Дата", "Количество услуг",
     "Сумма для распределения", "Медикаменты", "Сумма по тарифу",
-    "Специалист/Ресурс.Выполнение",
+    "ФИО Специалиста",
     "Персонал. Дополнительный персонал/ресурсы",
 ]
 
 COL_WIDTHS = [34, 65, 28, 20, 16, 16, 16, 22, 28, 34, 34]
+OUT_HEADERS.insert(3, COL_CODE)
+COL_WIDTHS.insert(3, 24)
 
 
 def load_db_maps():
@@ -162,13 +164,14 @@ def aggregate_for_patient_style(df: pd.DataFrame, meds_map: dict, profile_map: d
         "ФИО": g[COL_FIO],
         "Услуга": g[COL_SERVICE],
         "Код услуги по фед.номенклатуре": g[COL_FED_CODE],
+        COL_CODE: g[COL_CODE],
         "Состояние": g[COL_STATE],
         "Дата": g[COL_DATE],
         "Количество услуг": g["Количество услуг"].astype(int),
         "Сумма по тарифу": g["Сумма по тарифу"].round(2),
         "Медикаменты": g["Медикаменты"].round(2),
         "Сумма для распределения": g["Сумма для распределения"].round(2),
-        "Специалист/Ресурс.Выполнение": g[COL_SPEC],
+        "ФИО Специалиста": g[COL_SPEC],
         "Персонал. Дополнительный персонал/ресурсы": g[COL_EXTRA],
     })
 
@@ -209,31 +212,31 @@ def write_patient_like_sheet(ws, df_part, meds_map, profile_map):
                 row["ФИО"],
                 row["Услуга"],
                 row["Код услуги по фед.номенклатуре"],
+                row[COL_CODE],
                 row["Состояние"],
                 row["Дата"],
                 int(row["Количество услуг"]) if row["Количество услуг"] else 0,
                 float(row["Сумма для распределения"]) if row["Сумма для распределения"] else 0.0,
                 float(row["Медикаменты"]) if row["Медикаменты"] else 0.0,
                 float(row["Сумма по тарифу"]) if row["Сумма по тарифу"] else 0.0,
-                row["Специалист/Ресурс.Выполнение"],
+                row[COL_SPEC],
                 row["Персонал. Дополнительный персонал/ресурсы"]
             ]
             for c, v in enumerate(values, 1):
                 cell = ws.cell(r, c, v)
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
-                if c == 5 and v:  # Дата
-                    cell.number_format = "dd.mm.yyyy"
-                if c == 6: cell.number_format = "0"
-                if c in (7, 8, 9): cell.number_format = "0.00"
+                if c == 6 and v: cell.number_format = "dd.mm.yyyy"
+                if c == 7: cell.number_format = "0"
+                if c in (8, 9, 10): cell.number_format = "0.00"
             r += 1
 
     # Итог
     r += 1
     ws.cell(r, 1, "ИТОГО").font = Font(bold=True)
-    ws.cell(r, 6, int(table["Количество услуг"].sum() or 0)).font = Font(bold=True)
-    ws.cell(r, 7, round(table["Сумма для распределения"].sum() or 0, 2)).font = Font(bold=True)
-    ws.cell(r, 8, round(table["Медикаменты"].sum() or 0, 2)).font = Font(bold=True)
-    ws.cell(r, 9, round(table["Сумма по тарифу"].sum() or 0, 2)).font = Font(bold=True)
+    ws.cell(r, 7, int(table["Количество услуг"].sum() or 0)).font = Font(bold=True)
+    ws.cell(r, 8, round(table["Сумма для распределения"].sum() or 0, 2)).font = Font(bold=True)
+    ws.cell(r, 9, round(table["Медикаменты"].sum() or 0, 2)).font = Font(bold=True)
+    ws.cell(r, 10, round(table["Сумма по тарифу"].sum() or 0, 2)).font = Font(bold=True)
 
     # Форматирование
     for i, w in enumerate(COL_WIDTHS, 1):

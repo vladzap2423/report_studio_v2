@@ -56,6 +56,9 @@ const Header: React.FC<HeaderProps> = ({ title = "ReportStudio", links = [] }) =
       if (link.href === "/admin") {
         return user ? hasRequiredRole(user.role, "admin") : false;
       }
+      if (link.href === "/tasks") {
+        return Boolean(user);
+      }
       return true;
     });
   }, [links, user]);

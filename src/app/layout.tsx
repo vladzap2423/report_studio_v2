@@ -31,6 +31,7 @@ export default function RootLayout({
             title="ReportStudio"
             links={[
               { label: "Главная", href: "/" },
+              { label: "Задачи", href: "/tasks" },
               { label: "Админ", href: "/admin" },
             ]}
           />

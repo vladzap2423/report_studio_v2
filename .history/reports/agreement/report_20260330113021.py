@@ -213,7 +213,7 @@ def write_patient_like_sheet(ws, df_part: pd.DataFrame, meds_map: dict, profile_
                 float(row["Сумма для распределения"]) if row["Сумма для распределения"] else 0.0,
                 float(row["Медикаменты"]) if row["Медикаменты"] else 0.0,
                 float(row["Сумма по тарифу"]) if row["Сумма по тарифу"] else 0.0,
-                row[COL_SPEC],
+                row["Специалист/Ресурс.Выполнение"],
                 row["Персонал. Дополнительный персонал/ресурсы"]
             ]
             for c, v in enumerate(values, 1):

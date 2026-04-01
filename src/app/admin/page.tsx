@@ -8,13 +8,15 @@ import ProfilesAdminPanel from "./components/ProfilesAdminPanel";
 import ReportUploadPanel from "./components/ReportUploadPanel";
 import UsersAdminPanel from "./components/UsersAdminPanel";
 import PasswordPadAdminPage from "./components/PasswordPadAdminPage";
+import TaskGroupsAdminPanel from "./components/TaskGroupsAdminPanel";
 
-type Section = "services" | "profiles" | "reports" | "users" | "arduino";
+type Section = "services" | "profiles" | "reports" | "users" | "arduino" | "tasks";
 
 const sections: { id: Section; label: string }[] = [
   { id: "services", label: "Справочник услуг" },
   { id: "profiles", label: "Профили" },
   { id: "users", label: "Пользователи" },
+  { id: "tasks", label: "Группы задач" },
   { id: "reports", label: "Загрузка отчетов" },
   { id: "arduino", label: "Ардуино" }
 ];
@@ -22,6 +24,7 @@ const sections: { id: Section; label: string }[] = [
 function normalizeSection(input: string | null): Section {
   if (input === "profiles") return "profiles";
   if (input === "users") return "users";
+  if (input === "tasks") return "tasks";
   if (input === "reports") return "reports";
   if (input === "arduino") return "arduino";
   return "services";
@@ -60,6 +63,7 @@ export default function AdminPage() {
         {section === "services" && <ServicesAdminPanel />}
         {section === "profiles" && <ProfilesAdminPanel />}
         {section === "users" && <UsersAdminPanel />}
+        {section === "tasks" && <TaskGroupsAdminPanel />}
         {section === "reports" && <ReportUploadPanel />}
         {section === "arduino" && <PasswordPadAdminPage />}
       </section>
