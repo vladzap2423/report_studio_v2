@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AppSelect from "@/app/components/AppSelect";
 
 type SerialPortLike = {
   open(options: { baudRate: number }): Promise<void>;
@@ -728,10 +729,11 @@ export default function PasswordPadAdminPage() {
                     <div className="grid gap-3 sm:grid-cols-3">
                       <label className={`block ${labelClass}`}>
                         Кнопка
-                        <select
+                        <AppSelect
                           value={newSlot}
                           onChange={(event) => setNewSlot(Number(event.target.value))}
-                          className={inputClass}
+                          wrapperClassName="mt-1 w-full rounded-2xl border border-slate-300 bg-white text-slate-900 focus-within:ring-4 focus-within:ring-slate-200"
+                          selectClassName="px-3 py-2 pr-9 text-sm text-slate-800"
                           disabled={!canUseDevice}
                         >
                           {freeSlots.map((slot) => (
@@ -739,7 +741,7 @@ export default function PasswordPadAdminPage() {
                               {slot}
                             </option>
                           ))}
-                        </select>
+                        </AppSelect>
                       </label>
 
                       <label className={`block sm:col-span-2 ${labelClass}`}>

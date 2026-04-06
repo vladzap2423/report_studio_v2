@@ -134,6 +134,7 @@ async function createSchema() {
       priority task_priority NOT NULL DEFAULT 'medium',
       creator_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
       assignee_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      comments_count INTEGER NOT NULL DEFAULT 0,
       due_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -169,12 +170,36 @@ async function createSchema() {
     ADD COLUMN IF NOT EXISTS name TEXT;
   `);
 
+  await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS comments_count INTEGER NOT NULL DEFAULT 0;
+  `);
+
+  await pool.query(`
+    UPDATE tasks t
+    SET comments_count = counts.comments_count
+    FROM (
+      SELECT task_id, COUNT(*)::int AS comments_count
+      FROM task_comments
+      GROUP BY task_id
+    ) counts
+    WHERE counts.task_id = t.id
+      AND t.comments_count <> counts.comments_count;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET comments_count = 0
+    WHERE comments_count IS NULL;
+  `);
+
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_services_code ON services(code);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_services_profile ON services(profile);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_groups_active ON task_groups(is_active);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_group_members_user_group ON task_group_members(user_id, group_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_group_status_priority_due ON tasks(group_id, status, priority, due_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_group_assignee_status ON tasks(group_id, assignee_id, status);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_group_updated_at ON tasks(group_id, updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_comments_task_created ON task_comments(task_id, created_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_history_task_created ON task_history(task_id, created_at);`);

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { UserRole } from "@/lib/roles";
+import AppSelect from "@/app/components/AppSelect";
+import { useToastSync } from "@/app/components/AppToastProvider";
 
 type UserItem = {
   id: number;
@@ -30,6 +32,13 @@ export default function UsersAdminPanel() {
   const [updatingRoleId, setUpdatingRoleId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  useToastSync({
+    error,
+    clearError: () => setError(null),
+    message,
+    clearMessage: () => setMessage(null),
+  });
 
   const loadMe = useCallback(async () => {
     try {
@@ -194,17 +203,18 @@ export default function UsersAdminPanel() {
           className="rounded-xl border border-slate-300 bg-white/70 px-3 py-2 text-sm"
         />
         <div className="flex items-center gap-2">
-          <select
+          <AppSelect
             value={role}
             onChange={(e) => setRole(e.target.value as UserRole)}
-            className="w-full rounded-xl border border-slate-300 bg-white/70 px-3 py-2 text-sm"
+            wrapperClassName="w-full rounded-2xl border border-slate-300 bg-white/70 text-slate-700"
+            selectClassName="px-3 py-2 pr-9 text-sm text-slate-700"
           >
             {createRoleOptions.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
             ))}
-          </select>
+          </AppSelect>
           <button
             type="button"
             disabled={saving}
@@ -217,8 +227,6 @@ export default function UsersAdminPanel() {
       </div>
 
       {loading && <div className="mb-3 text-sm text-gray-500">Загрузка...</div>}
-      {error && <div className="mb-3 text-sm text-rose-700">{error}</div>}
-      {message && <div className="mb-3 text-sm text-emerald-700">{message}</div>}
 
       <div className="space-y-2">
         {users.map((item) => {
@@ -249,11 +257,12 @@ export default function UsersAdminPanel() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <select
+                <AppSelect
                   value={item.role}
                   disabled={!canEditRole || saving || updatingRoleId === item.id}
                   onChange={(e) => updateUserRole(item, e.target.value as UserRole)}
-                  className="rounded-lg border border-slate-300 bg-white/70 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100/80"
+                  wrapperClassName="rounded-2xl border border-slate-300 bg-white/70 text-slate-700"
+                  selectClassName="px-3 py-2 pr-9 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                   title={isSelf ? "Нельзя менять свою роль" : undefined}
                 >
                   {roleOptions.map((r) => (
@@ -261,7 +270,7 @@ export default function UsersAdminPanel() {
                       {r}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
 
                 <button
                   type="button"

@@ -1,0 +1,20 @@
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://127.0.0.1:3005
+- Network:       http://127.0.0.1:3005
+- Environments: .env
+
+✓ Starting...
+Creating turbopack project { dir: 'C:\\Progi\\report_studio_v2', testMode: true }
+✓ Ready in 2.6s
+ GET /api/auth/me 401 in 472ms (compile: 445ms, render: 27ms)
+ POST /api/auth/login 200 in 215ms (compile: 82ms, render: 132ms)
+ GET /api/users 200 in 74ms (compile: 61ms, render: 13ms)
+ POST /api/task-groups 201 in 157ms (compile: 138ms, render: 19ms)
+ POST /api/task-groups/members 200 in 94ms (compile: 75ms, render: 19ms)
+ POST /api/tasks 201 in 98ms (compile: 75ms, render: 23ms)
+ POST /api/auth/login 200 in 75ms (compile: 3ms, render: 72ms)
+ GET /api/task-groups 200 in 10ms (compile: 2ms, render: 8ms)
+ POST /api/tasks/status 403 in 86ms (compile: 68ms, render: 19ms)
+ POST /api/tasks/status 200 in 21ms (compile: 3ms, render: 18ms)
+ POST /api/tasks/status 200 in 18ms (compile: 2ms, render: 16ms)
+ GET /api/tasks?groupId=1 200 in 13ms (compile: 2ms, render: 10ms)

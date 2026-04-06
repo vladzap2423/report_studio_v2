@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { UserRole } from "@/lib/roles";
-import { useToastSync } from "@/app/components/AppToastProvider";
 
 type CurrentUser = {
   id: number;
@@ -100,13 +99,6 @@ export default function TaskGroupsAdminPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  useToastSync({
-    error,
-    clearError: () => setError(null),
-    message,
-    clearMessage: () => setMessage(null),
-  });
 
   const canManage = me?.role === "admin" || me?.role === "god";
 
@@ -423,9 +415,35 @@ export default function TaskGroupsAdminPanel() {
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mx-auto max-w-6xl">
+        <div className="mb-4 rounded-[28px] border border-slate-200 bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.98))] p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Группы задач</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                Группы отображаются вложенным списком. Откройте группу, чтобы посмотреть участников,
+                и при необходимости измените состав через чекбоксы по всему списку пользователей.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-500">
+              Всего групп: <span className="font-semibold text-slate-800">{groups.length}</span>
+            </div>
+          </div>
+        </div>
+
         {!canManage && (
           <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             Управление группами и участниками доступно только пользователям с ролями admin или god.
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
+        {message && (
+          <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {message}
           </div>
         )}
 

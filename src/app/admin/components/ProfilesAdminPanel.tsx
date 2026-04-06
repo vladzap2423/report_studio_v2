@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useToastSync } from "@/app/components/AppToastProvider";
 
 type Profile = {
   id: number;
@@ -16,6 +17,13 @@ export default function ProfilesAdminPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  useToastSync({
+    error,
+    clearError: () => setError(null),
+    message,
+    clearMessage: () => setMessage(null),
+  });
 
   const loadProfiles = useCallback(async () => {
     setLoading(true);
@@ -149,8 +157,6 @@ export default function ProfilesAdminPanel() {
       </div>
 
       {loading && <div className="mb-3 text-sm text-gray-500">Загрузка...</div>}
-      {error && <div className="mb-3 text-sm text-rose-700">{error}</div>}
-      {message && <div className="mb-3 text-sm text-emerald-700">{message}</div>}
 
       <div className="space-y-2">
         {profiles.map((profile) => (

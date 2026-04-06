@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useToastSync } from "@/app/components/AppToastProvider";
 
 function normalizeNextPath(input: string | null) {
   if (!input) return "/";
@@ -19,6 +20,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useToastSync({
+    error,
+    clearError: () => setError(null),
+  });
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -74,12 +80,6 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {error}
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={loading}
@@ -92,3 +92,4 @@ export default function LoginPage() {
     </main>
   );
 }
+

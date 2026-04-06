@@ -12,8 +12,8 @@ function parseRequiredNumber(value: string | null) {
   return Number.isFinite(num) ? num : null;
 }
 
-function isGod(role: string) {
-  return role === "god";
+function canManageTaskGroups(role: string) {
+  return role === "admin" || role === "god";
 }
 
 export async function GET(request: NextRequest) {
@@ -44,8 +44,8 @@ export async function POST(request: NextRequest) {
   const auth = await requireApiRole(request, "user");
   if (auth.response) return auth.response;
 
-  if (!isGod(auth.user.role)) {
-    return NextResponse.json({ error: "Only god can modify group members" }, { status: 403 });
+  if (!canManageTaskGroups(auth.user.role)) {
+    return NextResponse.json({ error: "Only admin can modify group members" }, { status: 403 });
   }
 
   try {
@@ -103,8 +103,8 @@ export async function DELETE(request: NextRequest) {
   const auth = await requireApiRole(request, "user");
   if (auth.response) return auth.response;
 
-  if (!isGod(auth.user.role)) {
-    return NextResponse.json({ error: "Only god can modify group members" }, { status: 403 });
+  if (!canManageTaskGroups(auth.user.role)) {
+    return NextResponse.json({ error: "Only admin can modify group members" }, { status: 403 });
   }
 
   try {

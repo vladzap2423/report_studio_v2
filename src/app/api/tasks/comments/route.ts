@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
-import { appendTaskHistory, getTaskById, userCanAccessTaskGroup } from "@/lib/tasks";
+import { appendTaskHistory, getTaskById, getTaskWithMetaById, userCanAccessTaskGroup } from "@/lib/tasks";
+import { publishTaskEvent } from "@/lib/task-events";
 
 type TaskCommentRow = {
   id: number;
@@ -106,6 +107,17 @@ export async function POST(request: NextRequest) {
     const comment = commentRes.rows[0];
     await appendTaskHistory(taskId, auth.user.id, "comment_add", null, { comment_id: comment.id });
 
+    await dbQuery(
+      `
+        UPDATE tasks
+        SET
+          comments_count = comments_count + 1,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [taskId]
+    );
+
     const withAuthorRes = await dbQuery<TaskCommentRow>(
       `
         SELECT
@@ -123,7 +135,19 @@ export async function POST(request: NextRequest) {
       [comment.id]
     );
 
-    return NextResponse.json({ comment: withAuthorRes.rows[0] }, { status: 201 });
+    const taskWithMeta = await getTaskWithMetaById(taskId);
+
+    publishTaskEvent({
+      type: "task_comment_added",
+      groupId: task.group_id,
+      taskId,
+      assigneeId: taskWithMeta?.assignee_id ?? task.assignee_id,
+      actorId: auth.user.id,
+      occurredAt: withAuthorRes.rows[0]?.created_at || new Date().toISOString(),
+      task: taskWithMeta,
+    });
+
+    return NextResponse.json({ comment: withAuthorRes.rows[0], task: taskWithMeta }, { status: 201 });
   } catch (error) {
     console.error("Failed to create task comment:", error);
     return NextResponse.json({ error: "Failed to create task comment" }, { status: 500 });

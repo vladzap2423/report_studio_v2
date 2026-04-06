@@ -5,29 +5,11 @@ import {
   appendTaskHistory,
   getTaskById,
   getTaskGroupMembers,
+  getTaskWithMetaById,
   isTaskGroupMember,
   userCanAccessTaskGroup,
-  type TaskPriority,
-  type TaskStatus,
 } from "@/lib/tasks";
-
-type TaskWithNames = {
-  id: number;
-  group_id: number;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  creator_id: number;
-  assignee_id: number | null;
-  due_at: string | null;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-  creator_name: string;
-  assignee_name: string | null;
-};
+import { publishTaskEvent } from "@/lib/task-events";
 
 function parseNumber(value: unknown) {
   const num = Number(value);
@@ -61,6 +43,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden for this task" }, { status: 403 });
     }
 
+    if (auth.user.role !== "god" && task.assignee_id !== auth.user.id) {
+      return NextResponse.json(
+        { error: "Only the assignee can transfer this task" },
+        { status: 403 }
+      );
+    }
+
     const member = await isTaskGroupMember(task.group_id, assigneeId);
     if (!member) {
       return NextResponse.json(
@@ -76,7 +65,12 @@ export async function POST(request: NextRequest) {
     await dbQuery(
       `
         UPDATE tasks
-        SET assignee_id = $1, updated_at = NOW()
+        SET
+          assignee_id = $1,
+          status = 'new',
+          started_at = NULL,
+          completed_at = NULL,
+          updated_at = NOW()
         WHERE id = $2
       `,
       [assigneeId, taskId]
@@ -88,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     const systemBody =
       `Передача задачи: ${fromMember?.name || "Не назначен"} -> ${toMember?.name || assigneeId}. ` +
-      `Причина: ${comment}`;
+      `Статус сброшен в «В очереди». Причина: ${comment}`;
 
     await dbQuery(
       `
@@ -102,37 +96,24 @@ export async function POST(request: NextRequest) {
       taskId,
       auth.user.id,
       "transfer",
-      { assignee_id: task.assignee_id },
-      { assignee_id: assigneeId, comment }
+      { assignee_id: task.assignee_id, status: task.status },
+      { assignee_id: assigneeId, status: "new", comment }
     );
 
-    const withNamesRes = await dbQuery<TaskWithNames>(
-      `
-        SELECT
-          t.id,
-          t.group_id,
-          t.title,
-          t.description,
-          t.status,
-          t.priority,
-          t.creator_id,
-          t.assignee_id,
-          t.due_at,
-          t.created_at,
-          t.updated_at,
-          t.started_at,
-          t.completed_at,
-          cu.name AS creator_name,
-          au.name AS assignee_name
-        FROM tasks t
-        INNER JOIN users cu ON cu.id = t.creator_id
-        LEFT JOIN users au ON au.id = t.assignee_id
-        WHERE t.id = $1
-      `,
-      [taskId]
-    );
+    const taskWithMeta = await getTaskWithMetaById(taskId);
+    if (taskWithMeta) {
+      publishTaskEvent({
+        type: "task_transferred",
+        groupId: taskWithMeta.group_id,
+        taskId: taskWithMeta.id,
+        assigneeId: taskWithMeta.assignee_id,
+        actorId: auth.user.id,
+        occurredAt: taskWithMeta.updated_at || new Date().toISOString(),
+        task: taskWithMeta,
+      });
+    }
 
-    return NextResponse.json({ task: withNamesRes.rows[0] });
+    return NextResponse.json({ task: taskWithMeta });
   } catch (error) {
     console.error("Failed to transfer task:", error);
     return NextResponse.json({ error: "Failed to transfer task" }, { status: 500 });

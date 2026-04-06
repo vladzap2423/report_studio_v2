@@ -5,29 +5,11 @@ import {
   appendTaskHistory,
   canTransitionTaskStatus,
   getTaskById,
+  getTaskWithMetaById,
   isTaskStatus,
   userCanAccessTaskGroup,
-  type TaskPriority,
-  type TaskStatus,
 } from "@/lib/tasks";
-
-type TaskWithNames = {
-  id: number;
-  group_id: number;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  creator_id: number;
-  assignee_id: number | null;
-  due_at: string | null;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-  creator_name: string;
-  assignee_name: string | null;
-};
+import { publishTaskEvent } from "@/lib/task-events";
 
 function parseNumber(value: unknown) {
   const num = Number(value);
@@ -58,38 +40,21 @@ export async function POST(request: NextRequest) {
     }
 
     if (task.status === nextStatus) {
-      const withNamesRes = await dbQuery<TaskWithNames>(
-        `
-          SELECT
-            t.id,
-            t.group_id,
-            t.title,
-            t.description,
-            t.status,
-            t.priority,
-            t.creator_id,
-            t.assignee_id,
-            t.due_at,
-            t.created_at,
-            t.updated_at,
-            t.started_at,
-            t.completed_at,
-            cu.name AS creator_name,
-            au.name AS assignee_name
-          FROM tasks t
-          INNER JOIN users cu ON cu.id = t.creator_id
-          LEFT JOIN users au ON au.id = t.assignee_id
-          WHERE t.id = $1
-        `,
-        [taskId]
-      );
-      return NextResponse.json({ task: withNamesRes.rows[0] });
+      const taskWithMeta = await getTaskWithMetaById(taskId);
+      return NextResponse.json({ task: taskWithMeta });
     }
 
     if (!canTransitionTaskStatus(task.status, nextStatus)) {
       return NextResponse.json(
         { error: `Invalid status transition: ${task.status} -> ${nextStatus}` },
         { status: 400 }
+      );
+    }
+
+    if (auth.user.role !== "god" && task.assignee_id !== auth.user.id) {
+      return NextResponse.json(
+        { error: "Only the assignee can change task status" },
+        { status: 403 }
       );
     }
 
@@ -102,6 +67,10 @@ export async function POST(request: NextRequest) {
 
     if (nextStatus === "done") {
       setClauses.push("completed_at = NOW()");
+    }
+
+    if (task.status === "done" && nextStatus !== "done") {
+      setClauses.push("completed_at = NULL");
     }
 
     values.push(taskId);
@@ -123,33 +92,20 @@ export async function POST(request: NextRequest) {
       { status: nextStatus }
     );
 
-    const withNamesRes = await dbQuery<TaskWithNames>(
-      `
-        SELECT
-          t.id,
-          t.group_id,
-          t.title,
-          t.description,
-          t.status,
-          t.priority,
-          t.creator_id,
-          t.assignee_id,
-          t.due_at,
-          t.created_at,
-          t.updated_at,
-          t.started_at,
-          t.completed_at,
-          cu.name AS creator_name,
-          au.name AS assignee_name
-        FROM tasks t
-        INNER JOIN users cu ON cu.id = t.creator_id
-        LEFT JOIN users au ON au.id = t.assignee_id
-        WHERE t.id = $1
-      `,
-      [taskId]
-    );
+    const taskWithMeta = await getTaskWithMetaById(taskId);
+    if (taskWithMeta) {
+      publishTaskEvent({
+        type: "task_status_changed",
+        groupId: taskWithMeta.group_id,
+        taskId: taskWithMeta.id,
+        assigneeId: taskWithMeta.assignee_id,
+        actorId: auth.user.id,
+        occurredAt: taskWithMeta.updated_at || new Date().toISOString(),
+        task: taskWithMeta,
+      });
+    }
 
-    return NextResponse.json({ task: withNamesRes.rows[0] });
+    return NextResponse.json({ task: taskWithMeta });
   } catch (error) {
     console.error("Failed to update task status:", error);
     return NextResponse.json({ error: "Failed to update task status" }, { status: 500 });

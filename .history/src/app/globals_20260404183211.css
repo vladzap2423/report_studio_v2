@@ -1,0 +1,86 @@
+﻿@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --app-max-width: 1400px;
+  --app-main-max-width: 1680px;
+  --app-gutter: 16px;
+  --app-header-py: 12px;
+  --app-content-py: 12px;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), "Segoe UI", sans-serif;
+  position: relative;
+  overflow: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("/fon.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(3px) brightness(0.7);
+  z-index: -1;
+}
+
+.app-shell {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-frame {
+  width: min(var(--app-max-width), calc(100% - (var(--app-gutter) * 2)));
+  margin-inline: auto;
+}
+
+.app-main-frame {
+  width: min(var(--app-main-max-width), calc(100% - (var(--app-gutter) * 2)));
+  margin-inline: auto;
+}
+
+.app-header {
+  flex: 0 0 auto;
+  padding-block: var(--app-header-py);
+}
+
+.app-main-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: var(--app-content-py);
+}
+
+.app-page {
+  height: 100%;
+  overflow: auto;
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --app-gutter: 20px;
+    --app-header-py: 14px;
+    --app-content-py: 14px;
+  }
+}

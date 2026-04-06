@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { DragEvent, useCallback, useRef, useState } from "react";
+import { useToastSync } from "@/app/components/AppToastProvider";
 
 type UploadFile = {
   file: File;
@@ -18,6 +19,13 @@ export default function ReportUploadPanel() {
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dragDepth = useRef(0);
+
+  useToastSync({
+    error,
+    clearError: () => setError(null),
+    message: success,
+    clearMessage: () => setSuccess(null),
+  });
 
   const mapUploadFiles = useCallback((picked: File[]) => {
     return picked.map((file) => ({
@@ -175,18 +183,6 @@ export default function ReportUploadPanel() {
               Перезаписать, если уже существует
             </label>
           </div>
-
-          {error && (
-            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-center text-sm text-rose-700">
-              {error}
-            </div>
-          )}
-
-          {success && (
-            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-sm text-emerald-700">
-              {success}
-            </div>
-          )}
 
           <div className="mt-6 flex justify-center">
             <button

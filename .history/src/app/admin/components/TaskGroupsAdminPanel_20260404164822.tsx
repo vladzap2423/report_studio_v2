@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { UserRole } from "@/lib/roles";
-import { useToastSync } from "@/app/components/AppToastProvider";
 
 type CurrentUser = {
   id: number;
@@ -100,13 +99,6 @@ export default function TaskGroupsAdminPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  useToastSync({
-    error,
-    clearError: () => setError(null),
-    message,
-    clearMessage: () => setMessage(null),
-  });
 
   const canManage = me?.role === "admin" || me?.role === "god";
 
@@ -426,6 +418,17 @@ export default function TaskGroupsAdminPanel() {
         {!canManage && (
           <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             Управление группами и участниками доступно только пользователям с ролями admin или god.
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
+        {message && (
+          <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {message}
           </div>
         )}
 

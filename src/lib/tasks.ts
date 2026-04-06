@@ -17,10 +17,10 @@ export type TaskPriority = (typeof TASK_PRIORITY_VALUES)[number];
 
 const TASK_STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   new: ["in_progress", "canceled"],
-  in_progress: ["review", "blocked", "canceled"],
-  blocked: ["in_progress", "canceled"],
+  in_progress: ["done", "review", "blocked", "canceled"],
+  blocked: ["in_progress", "done", "canceled"],
   review: ["done", "canceled", "in_progress"],
-  done: [],
+  done: ["in_progress"],
   canceled: [],
 };
 
@@ -67,6 +67,12 @@ export type TaskRow = {
   updated_at: string;
   started_at: string | null;
   completed_at: string | null;
+};
+
+export type TaskWithMetaRow = TaskRow & {
+  creator_name: string;
+  assignee_name: string | null;
+  comments_count: number;
 };
 
 export async function getAccessibleTaskGroups(user: SessionUser): Promise<TaskGroupRow[]> {
@@ -174,6 +180,38 @@ export async function getTaskById(taskId: number): Promise<TaskRow | null> {
     `,
     [taskId]
   );
+  return taskRes.rows[0] || null;
+}
+
+export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaRow | null> {
+  const taskRes = await dbQuery<TaskWithMetaRow>(
+    `
+      SELECT
+        t.id,
+        t.group_id,
+        t.title,
+        t.description,
+        t.status,
+        t.priority,
+        t.creator_id,
+        t.assignee_id,
+        t.due_at,
+        t.created_at,
+        t.updated_at,
+        t.started_at,
+        t.completed_at,
+        cu.name AS creator_name,
+        au.name AS assignee_name,
+        t.comments_count
+      FROM tasks t
+      INNER JOIN users cu ON cu.id = t.creator_id
+      LEFT JOIN users au ON au.id = t.assignee_id
+      WHERE t.id = $1
+      LIMIT 1
+    `,
+    [taskId]
+  );
+
   return taskRes.rows[0] || null;
 }
 

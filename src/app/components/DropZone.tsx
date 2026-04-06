@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useRef, useState, DragEvent, ChangeEvent, useCallback } from "react";
+import { useToastSync } from "@/app/components/AppToastProvider";
 
 type DropZoneProps = {
   accept?: string;
@@ -14,6 +15,11 @@ export default function DropZone({ accept = ".csv,.xlsx,.xls", onFilesPicked }: 
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+
+  useToastSync({
+    error,
+    clearError: () => setError(null),
+  });
 
   const validateFiles = useCallback((picked: File[]) => {
     if (!picked.length) return "Файл не выбран";
@@ -119,12 +125,6 @@ export default function DropZone({ accept = ".csv,.xlsx,.xls", onFilesPicked }: 
           }}
         />
       </div>
-
-      {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </div>
-      )}
 
       {files.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">

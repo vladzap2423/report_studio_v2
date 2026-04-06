@@ -2,6 +2,8 @@
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VirtualItem, useVirtualizer } from "@tanstack/react-virtual";
+import AppSelect from "@/app/components/AppSelect";
+import { useToastSync } from "@/app/components/AppToastProvider";
 
 type Service = {
   id: number;
@@ -26,6 +28,13 @@ export default function ServicesAdminPanel() {
 
   const parentRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
+
+  useToastSync({
+    error: importError,
+    clearError: () => setImportError(null),
+    message: importMessage,
+    clearMessage: () => setImportMessage(null),
+  });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -224,18 +233,6 @@ export default function ServicesAdminPanel() {
         Импорт полностью заменяет таблицу services.
       </p>
 
-      {importMessage && (
-        <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-          {importMessage}
-        </div>
-      )}
-
-      {importError && (
-        <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
-          {importError}
-        </div>
-      )}
-
       <div className={`${servicesGridClass} rounded-t-lg border border-gray-200 bg-gray-50/90 px-2 py-1 font-medium text-gray-600`}>
         <div>Код услуги</div>
         <div>Название услуги</div>
@@ -287,11 +284,13 @@ export default function ServicesAdminPanel() {
                   className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-center text-sm focus:border-blue-400 focus:bg-white/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 />
 
-                <select
+                <AppSelect
                   defaultValue={item.profile ?? ""}
                   disabled={!isEditing}
                   onChange={(e) => saveField(item.id, "profile", e.target.value)}
-                  className="w-full rounded border border-transparent bg-white/70 px-1.5 py-0.5 text-sm focus:border-blue-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                  wrapperClassName="w-full rounded-xl border border-transparent bg-white/70 text-slate-700 focus-within:border-blue-400"
+                  selectClassName="px-1.5 py-0.5 pr-7 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  iconClassName="text-slate-500"
                 >
                   <option value="">— не выбран —</option>
                   {profiles.map((p) => (
@@ -299,7 +298,7 @@ export default function ServicesAdminPanel() {
                       {p}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
 
                 <div className="flex justify-center">
                   <button

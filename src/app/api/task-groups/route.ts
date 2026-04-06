@@ -3,8 +3,8 @@ import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
 import { getAccessibleTaskGroups, type TaskGroupRow } from "@/lib/tasks";
 
-function isGod(role: string) {
-  return role === "god";
+function canManageTaskGroups(role: string) {
+  return role === "admin" || role === "god";
 }
 
 export async function GET(request: NextRequest) {
@@ -24,8 +24,8 @@ export async function POST(request: NextRequest) {
   const auth = await requireApiRole(request, "user");
   if (auth.response) return auth.response;
 
-  if (!isGod(auth.user.role)) {
-    return NextResponse.json({ error: "Only god can create task groups" }, { status: 403 });
+  if (!canManageTaskGroups(auth.user.role)) {
+    return NextResponse.json({ error: "Only admin can create task groups" }, { status: 403 });
   }
 
   try {
@@ -70,8 +70,8 @@ export async function PATCH(request: NextRequest) {
   const auth = await requireApiRole(request, "user");
   if (auth.response) return auth.response;
 
-  if (!isGod(auth.user.role)) {
-    return NextResponse.json({ error: "Only god can update task groups" }, { status: 403 });
+  if (!canManageTaskGroups(auth.user.role)) {
+    return NextResponse.json({ error: "Only admin can update task groups" }, { status: 403 });
   }
 
   try {

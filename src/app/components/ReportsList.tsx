@@ -1,6 +1,7 @@
 "use client";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
+import { useToastSync } from "@/app/components/AppToastProvider";
 
 export type ReportMeta = {
   id: string;
@@ -21,6 +22,11 @@ export default function ReportsList({ files }: ReportsListProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+
+  useToastSync({
+    error: runError,
+    clearError: () => setRunError(null),
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -50,7 +56,7 @@ export default function ReportsList({ files }: ReportsListProps) {
     };
 
     fetchReports();
-  }, [selectedReportId]);
+  }, []);
 
   const runSelected = async (reportId?: string) => {
     if (!files.length) return setRunError("Сначала загрузите файл с данными.");
@@ -113,11 +119,7 @@ export default function ReportsList({ files }: ReportsListProps) {
 
       <h2 className="mb-4 text-2xl font-semibold text-slate-900">Отчеты</h2>
       <div className="mt-6 rounded-3xl border bg-white/70 p-6 shadow-sm">
-        {runError && (
-          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {runError}
-          </div>
-        )}
+
         {isRunning && <div className="mb-4 text-sm text-slate-700">Выполняется...</div>}
         {reportsLoading ? (
           <div className="text-sm text-slate-600">Загрузка списка отчетов...</div>
@@ -156,3 +158,4 @@ export default function ReportsList({ files }: ReportsListProps) {
     </div>
   );
 }
+

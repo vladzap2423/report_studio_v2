@@ -4,31 +4,17 @@ import { requireApiRole } from "@/lib/require-api-role";
 import {
   appendTaskHistory,
   getTaskById,
+  getTaskWithMetaById,
   isTaskGroupMember,
   isTaskPriority,
   isTaskStatus,
   userCanAccessTaskGroup,
   type TaskPriority,
-  type TaskStatus,
+  type TaskWithMetaRow,
 } from "@/lib/tasks";
+import { publishTaskEvent } from "@/lib/task-events";
 
-type TaskListItem = {
-  id: number;
-  group_id: number;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  creator_id: number;
-  assignee_id: number | null;
-  due_at: string | null;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-  creator_name: string;
-  assignee_name: string | null;
-};
+type TaskListItem = TaskWithMetaRow;
 
 function parseNumber(value: unknown) {
   const num = Number(value);
@@ -116,7 +102,8 @@ export async function GET(request: NextRequest) {
           t.started_at,
           t.completed_at,
           cu.name AS creator_name,
-          au.name AS assignee_name
+          au.name AS assignee_name,
+          t.comments_count
         FROM tasks t
         INNER JOIN users cu ON cu.id = t.creator_id
         LEFT JOIN users au ON au.id = t.assignee_id
@@ -227,33 +214,20 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    const withNamesRes = await dbQuery<TaskListItem>(
-      `
-        SELECT
-          t.id,
-          t.group_id,
-          t.title,
-          t.description,
-          t.status,
-          t.priority,
-          t.creator_id,
-          t.assignee_id,
-          t.due_at,
-          t.created_at,
-          t.updated_at,
-          t.started_at,
-          t.completed_at,
-          cu.name AS creator_name,
-          au.name AS assignee_name
-        FROM tasks t
-        INNER JOIN users cu ON cu.id = t.creator_id
-        LEFT JOIN users au ON au.id = t.assignee_id
-        WHERE t.id = $1
-      `,
-      [task.id]
-    );
+    const taskWithMeta = await getTaskWithMetaById(task.id);
+    if (taskWithMeta) {
+      publishTaskEvent({
+        type: "task_created",
+        groupId: taskWithMeta.group_id,
+        taskId: taskWithMeta.id,
+        assigneeId: taskWithMeta.assignee_id,
+        actorId: auth.user.id,
+        occurredAt: taskWithMeta.updated_at || taskWithMeta.created_at,
+        task: taskWithMeta,
+      });
+    }
 
-    return NextResponse.json({ task: withNamesRes.rows[0] }, { status: 201 });
+    return NextResponse.json({ task: taskWithMeta }, { status: 201 });
   } catch (error) {
     console.error("Failed to create task:", error);
     return NextResponse.json({ error: "Failed to create task" }, { status: 500 });
@@ -353,7 +327,8 @@ export async function PUT(request: NextRequest) {
     }
 
     if (updates.length === 0) {
-      return NextResponse.json({ task: existing });
+      const taskWithMeta = await getTaskWithMetaById(id);
+      return NextResponse.json({ task: taskWithMeta });
     }
 
     updates.push("updated_at = NOW()");
@@ -387,33 +362,20 @@ export async function PUT(request: NextRequest) {
     const task = updateRes.rows[0];
     await appendTaskHistory(task.id, auth.user.id, "update", oldValue, newValue);
 
-    const withNamesRes = await dbQuery<TaskListItem>(
-      `
-        SELECT
-          t.id,
-          t.group_id,
-          t.title,
-          t.description,
-          t.status,
-          t.priority,
-          t.creator_id,
-          t.assignee_id,
-          t.due_at,
-          t.created_at,
-          t.updated_at,
-          t.started_at,
-          t.completed_at,
-          cu.name AS creator_name,
-          au.name AS assignee_name
-        FROM tasks t
-        INNER JOIN users cu ON cu.id = t.creator_id
-        LEFT JOIN users au ON au.id = t.assignee_id
-        WHERE t.id = $1
-      `,
-      [task.id]
-    );
+    const taskWithMeta = await getTaskWithMetaById(task.id);
+    if (taskWithMeta) {
+      publishTaskEvent({
+        type: "task_updated",
+        groupId: taskWithMeta.group_id,
+        taskId: taskWithMeta.id,
+        assigneeId: taskWithMeta.assignee_id,
+        actorId: auth.user.id,
+        occurredAt: taskWithMeta.updated_at || taskWithMeta.created_at,
+        task: taskWithMeta,
+      });
+    }
 
-    return NextResponse.json({ task: withNamesRes.rows[0] });
+    return NextResponse.json({ task: taskWithMeta });
   } catch (error) {
     console.error("Failed to update task:", error);
     return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
