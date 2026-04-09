@@ -148,6 +148,7 @@ async function createSchema() {
       id BIGSERIAL PRIMARY KEY,
       task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       author_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+      kind TEXT NOT NULL DEFAULT 'comment',
       body TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -166,6 +167,21 @@ async function createSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      group_id BIGINT NOT NULL REFERENCES task_groups(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      actor_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      comment_id BIGINT REFERENCES task_comments(id) ON DELETE CASCADE,
+      is_seen BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      seen_at TIMESTAMPTZ
+    );
+  `);
+
+  await pool.query(`
     ALTER TABLE services
     ADD COLUMN IF NOT EXISTS name TEXT;
   `);
@@ -173,6 +189,20 @@ async function createSchema() {
   await pool.query(`
     ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS comments_count INTEGER NOT NULL DEFAULT 0;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_comments
+    ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'comment';
+  `);
+
+  await pool.query(`
+    UPDATE task_comments
+    SET
+      kind = 'transfer',
+      body = COALESCE(NULLIF(BTRIM(SPLIT_PART(body, 'Причина:', 2)), ''), body)
+    WHERE kind = 'comment'
+      AND body LIKE 'Передача задачи:%Причина:%';
   `);
 
   await pool.query(`
@@ -203,6 +233,8 @@ async function createSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_comments_task_created ON task_comments(task_id, created_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_history_task_created ON task_history(task_id, created_at);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_notifications_user_seen_group ON task_notifications(user_id, is_seen, group_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_notifications_task_kind ON task_notifications(task_id, kind);`);
 }
 
 async function seedDefaultGodUser() {

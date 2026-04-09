@@ -3,10 +3,12 @@ import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
 import { getAccessibleTaskGroups } from "@/lib/tasks";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type TaskQueueSignalRow = {
-  group_id: number;
-  latest_activity_at: string | null;
-  queue_count: number;
+  group_id: number | string;
+  unread_count: number;
 };
 
 function parseGroupIds(value: string | null) {
@@ -28,7 +30,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const accessibleGroups = await getAccessibleTaskGroups(auth.user);
-    const accessibleGroupIds = accessibleGroups.map((group) => group.id);
+    const accessibleGroupIds = accessibleGroups
+      .map((group) => Number(group.id))
+      .filter((groupId) => Number.isFinite(groupId) && groupId > 0);
     const requestedGroupIds = parseGroupIds(new URL(request.url).searchParams.get("groupIds"));
 
     const targetGroupIds =
@@ -43,23 +47,22 @@ export async function GET(request: NextRequest) {
     const signalsRes = await dbQuery<TaskQueueSignalRow>(
       `
         SELECT
-          t.group_id,
-          COUNT(*)::int AS queue_count,
-          MAX(COALESCE(t.updated_at, t.created_at))::text AS latest_activity_at
-        FROM tasks t
-        WHERE t.assignee_id = $1
-          AND t.group_id = ANY($2::int[])
-          AND t.status = 'new'
-        GROUP BY t.group_id
+          n.group_id,
+          COUNT(*)::int AS unread_count
+        FROM task_notifications n
+        WHERE n.user_id = $1
+          AND n.group_id = ANY($2::bigint[])
+          AND n.kind = 'transfer'
+          AND n.is_seen = FALSE
+        GROUP BY n.group_id
       `,
       [auth.user.id, targetGroupIds]
     );
 
     return NextResponse.json({
       signals: signalsRes.rows.map((row) => ({
-        groupId: row.group_id,
-        queueCount: row.queue_count,
-        latestActivityAt: row.latest_activity_at,
+        groupId: Number(row.group_id),
+        unreadCount: row.unread_count,
       })),
     });
   } catch (error) {

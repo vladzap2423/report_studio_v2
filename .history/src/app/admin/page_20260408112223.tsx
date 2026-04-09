@@ -42,8 +42,8 @@ const sectionGroups: {
     items: [{ id: "tasks", label: "Группы" }],
   },
   {
-    title: "ПРОЧЕЕ",
-    description: "Другие...",
+    title: "Интеграции",
+    description: "Подключенные устройства и панели",
     items: [{ id: "arduino", label: "Ардуино" }],
   },
 ];

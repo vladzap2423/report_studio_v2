@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
   if (auth.response) return auth.response;
 
   const accessibleGroups = await getAccessibleTaskGroups(auth.user);
-  const accessibleGroupIds = accessibleGroups.map((group) => group.id);
+  const accessibleGroupIds = accessibleGroups
+    .map((group) => Number(group.id))
+    .filter((groupId) => Number.isFinite(groupId) && groupId > 0);
   const requestedGroupIds = parseGroupIds(new URL(request.url).searchParams.get("groupIds"));
 
   const allowedGroupIds =

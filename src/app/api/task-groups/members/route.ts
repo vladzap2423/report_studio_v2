@@ -7,13 +7,16 @@ import {
   type TaskMemberRow,
 } from "@/lib/tasks";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function parseRequiredNumber(value: string | null) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }
 
 function canManageTaskGroups(role: string) {
-  return role === "admin" || role === "god";
+  return role === "god";
 }
 
 export async function GET(request: NextRequest) {

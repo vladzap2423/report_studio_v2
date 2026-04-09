@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useToastSync } from "@/app/components/AppToastProvider";
 
@@ -11,7 +11,7 @@ function normalizeNextPath(input: string | null) {
   return input;
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = useMemo(() => normalizeNextPath(searchParams.get("next")), [searchParams]);
@@ -90,6 +90,22 @@ export default function LoginPage() {
         </form>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+            <h1 className="mb-6 text-2xl font-semibold text-slate-900">Вход</h1>
+          </div>
+        </main>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
   );
 }
 

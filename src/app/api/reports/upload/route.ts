@@ -28,7 +28,7 @@ async function exists(p: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireApiRole(req, "admin");
+  const auth = await requireApiRole(req, "god");
   if (auth.response) return auth.response;
 
   const form = await req.formData();

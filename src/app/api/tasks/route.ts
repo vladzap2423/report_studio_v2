@@ -14,6 +14,9 @@ import {
 } from "@/lib/tasks";
 import { publishTaskEvent } from "@/lib/task-events";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type TaskListItem = TaskWithMetaRow;
 
 function parseNumber(value: unknown) {

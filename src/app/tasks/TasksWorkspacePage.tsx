@@ -58,6 +58,7 @@ type TaskComment = {
   id: number;
   task_id: number;
   author_id: number;
+  kind: "comment" | "transfer";
   body: string;
   created_at: string;
   author_name: string;
@@ -66,24 +67,53 @@ type TaskComment = {
 
 type TaskQueueSignal = {
   groupId: number;
-  latestActivityAt: string | null;
-  queueCount: number;
+  unreadCount: number;
 };
 
-type TaskStreamEvent = {
-  type:
-    | "task_created"
-    | "task_updated"
-    | "task_status_changed"
-    | "task_transferred"
-    | "task_comment_added";
-  groupId: number;
-  taskId: number;
-  assigneeId: number | null;
-  actorId: number | null;
-  occurredAt: string;
-  task?: TaskItem | null;
-};
+function normalizeId(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeCurrentUser(user: CurrentUser | null) {
+  return user ? { ...user, id: normalizeId(user.id) } : null;
+}
+
+function normalizeTaskGroup(group: TaskGroup): TaskGroup {
+  return {
+    ...group,
+    id: normalizeId(group.id),
+    created_by: group.created_by == null ? null : normalizeId(group.created_by),
+  };
+}
+
+function normalizeTaskMember(member: TaskMember): TaskMember {
+  return {
+    ...member,
+    id: normalizeId(member.id),
+  };
+}
+
+function normalizeTaskItem(task: TaskItem): TaskItem {
+  return {
+    ...task,
+    id: normalizeId(task.id),
+    group_id: normalizeId(task.group_id),
+    creator_id: normalizeId(task.creator_id),
+    assignee_id: task.assignee_id == null ? null : normalizeId(task.assignee_id),
+    comments_count: task.comments_count ?? 0,
+  };
+}
+
+function normalizeTaskComment(comment: TaskComment): TaskComment {
+  return {
+    ...comment,
+    id: normalizeId(comment.id),
+    task_id: normalizeId(comment.task_id),
+    author_id: normalizeId(comment.author_id),
+    kind: comment.kind === "transfer" ? "transfer" : "comment",
+  };
+}
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   high: "Высокий",
@@ -103,12 +133,13 @@ const BUCKET_LABELS: Record<TaskBucket, string> = {
   queue: "В очереди",
 };
 
+const TASKS_POLL_INTERVAL_MS = 5000;
+const GROUP_SIGNALS_POLL_INTERVAL_MS = 2000;
+const COMMENTS_POLL_INTERVAL_MS = 4000;
+const COMMENT_TOAST_SUPPRESSION_MS = 12000;
+
 function cls(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
-}
-
-function getQueueSeenStorageKey(userId: number, groupId: number) {
-  return `tasks.queueSeen:${userId}:${groupId}`;
 }
 
 function toTimestamp(value: string | null | undefined) {
@@ -162,6 +193,7 @@ function sortTaskItems(items: TaskItem[]) {
 
 async function apiJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
+    cache: "no-store",
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -186,6 +218,20 @@ function PlusIcon() {
     <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-hidden="true">
       <path
         d="M8 3.25v9.5M3.25 8h9.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" aria-hidden="true">
+      <path
+        d="M4 4l8 8M12 4l-8 8"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -231,11 +277,15 @@ export default function TasksWorkspacePage() {
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const activeGroupIdRef = useRef<number | null>(null);
-  const commentsTaskIdRef = useRef<number | null>(null);
-  const commentsRefreshTimerRef = useRef<number | null>(null);
+  const meRef = useRef<CurrentUser | null>(null);
+  const tasksRef = useRef<TaskItem[]>([]);
+  const tasksGroupIdRef = useRef<number | null>(null);
   const queueSignalRefreshTimerRef = useRef<number | null>(null);
   const pendingQueueSignalGroupIdsRef = useRef<Set<number>>(new Set());
+  const markingQueueSignalsSeenRef = useRef<Set<number>>(new Set());
+  const ownCommentToastSuppressionRef = useRef<Map<number, number>>(new Map());
+  const commentsViewportRef = useRef<HTMLDivElement | null>(null);
+  const pendingCommentsScrollRef = useRef(false);
 
   useToastSync({
     error,
@@ -245,23 +295,35 @@ export default function TasksWorkspacePage() {
   });
 
   useEffect(() => {
-    activeGroupIdRef.current = activeGroupId;
-  }, [activeGroupId]);
+    meRef.current = me;
+  }, [me]);
 
   useEffect(() => {
-    commentsTaskIdRef.current = commentsTask?.id ?? null;
-  }, [commentsTask]);
+    tasksRef.current = tasks;
+    tasksGroupIdRef.current = activeGroupId;
+  }, [activeGroupId, tasks]);
 
   useEffect(() => {
     return () => {
-      if (commentsRefreshTimerRef.current !== null) {
-        window.clearTimeout(commentsRefreshTimerRef.current);
-      }
       if (queueSignalRefreshTimerRef.current !== null) {
         window.clearTimeout(queueSignalRefreshTimerRef.current);
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!commentsTask || !pendingCommentsScrollRef.current || loadingComments) return;
+
+    const scrollToBottom = () => {
+      const viewport = commentsViewportRef.current;
+      if (!viewport) return;
+      viewport.scrollTop = viewport.scrollHeight;
+      pendingCommentsScrollRef.current = false;
+    };
+
+    const frameId = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [comments, commentsTask, loadingComments]);
 
   const activeGroup = useMemo(
     () => groups.find((group) => group.id === activeGroupId) || null,
@@ -303,8 +365,7 @@ export default function TasksWorkspacePage() {
     [activeBucket, tasksForSelectedMember]
   );
 
-  const [seenQueueAtByGroup, setSeenQueueAtByGroup] = useState<Record<number, number>>({});
-  const [queueActivityByGroup, setQueueActivityByGroup] = useState<Record<number, number>>({});
+  const [queueUnreadCountByGroup, setQueueUnreadCountByGroup] = useState<Record<number, number>>({});
 
   const bucketCounts = useMemo(() => {
     const counts: Record<TaskBucket, number> = {
@@ -320,27 +381,9 @@ export default function TasksWorkspacePage() {
     return counts;
   }, [tasksForSelectedMember]);
 
-  const myQueueTasks = useMemo(() => {
-    if (!me) return [];
-    return tasks.filter(
-      (task) => task.assignee_id === me.id && taskBucketFromStatus(task.status) === "queue"
-    );
-  }, [me, tasks]);
-
-  const latestMyQueueActivityAt = useMemo(
-    () =>
-      myQueueTasks.reduce(
-        (max, task) => Math.max(max, toTimestamp(task.updated_at) || toTimestamp(task.created_at)),
-        0
-      ),
-    [myQueueTasks]
-  );
-
-  const currentGroupLastSeenQueueAt = activeGroupId ? seenQueueAtByGroup[activeGroupId] ?? 0 : 0;
-
-  const hasUnreadQueueSignal =
-    (activeGroupId ? queueActivityByGroup[activeGroupId] ?? latestMyQueueActivityAt : 0) >
-    currentGroupLastSeenQueueAt;
+  const hasUnreadQueueSignal = activeGroupId
+    ? (queueUnreadCountByGroup[activeGroupId] ?? 0) > 0
+    : false;
 
   const upsertTaskInState = useCallback((nextTask: TaskItem) => {
     setTasks((prev) => {
@@ -376,12 +419,21 @@ export default function TasksWorkspacePage() {
     );
   }, []);
 
+  const pruneCommentToastSuppression = useCallback(() => {
+    const now = Date.now();
+    ownCommentToastSuppressionRef.current.forEach((until, taskId) => {
+      if (until <= now) {
+        ownCommentToastSuppressionRef.current.delete(taskId);
+      }
+    });
+  }, []);
+
   const loadMembers = useCallback(async (groupId: number, options?: { silent?: boolean }) => {
     try {
       const result = await apiJson<{ members: TaskMember[] }>(
         `/api/task-groups/members?groupId=${groupId}`
       );
-      setMembers(result.members);
+      setMembers(result.members.map(normalizeTaskMember));
     } catch (err: any) {
       if (!options?.silent) {
         setMembers([]);
@@ -392,30 +444,59 @@ export default function TasksWorkspacePage() {
     }
   }, []);
 
-  const loadTasks = useCallback(async (groupId: number, options?: { silent?: boolean }) => {
-    if (!options?.silent) {
-      setLoadingTasks(true);
-    }
-
-    try {
-      const result = await apiJson<{ tasks: TaskItem[] }>(`/api/tasks?groupId=${groupId}`);
-      setTasks(
-        sortTaskItems(result.tasks.map((task) => ({ ...task, comments_count: task.comments_count ?? 0 })))
-      );
-    } catch (err: any) {
+  const loadTasks = useCallback(
+    async (groupId: number, options?: { silent?: boolean; detectIncoming?: boolean }) => {
       if (!options?.silent) {
-        setTasks([]);
-        setError(err?.message || "Не удалось загрузить задачи");
-      } else {
-        console.error("Failed to refresh tasks:", err);
+        setLoadingTasks(true);
       }
-    } finally {
-      if (!options?.silent) {
-        setLoadingTasks(false);
-      }
-    }
-  }, []);
 
+      try {
+        const result = await apiJson<{ tasks: TaskItem[] }>(`/api/tasks?groupId=${groupId}`);
+        const nextTasks = sortTaskItems(result.tasks.map(normalizeTaskItem));
+
+        if (options?.detectIncoming && tasksGroupIdRef.current === groupId) {
+          const currentUserId = meRef.current?.id ?? null;
+          if (currentUserId) {
+            pruneCommentToastSuppression();
+
+            const previousById = new Map(tasksRef.current.map((task) => [task.id, task]));
+            nextTasks.forEach((task) => {
+              const previousTask = previousById.get(task.id);
+              if (!previousTask) return;
+
+              if (previousTask.assignee_id !== currentUserId && task.assignee_id === currentUserId) {
+                showInfo(`Вам передали задачу: ${task.title}`);
+              }
+
+              if (
+                previousTask.assignee_id === currentUserId &&
+                task.assignee_id === currentUserId &&
+                (task.comments_count ?? 0) > (previousTask.comments_count ?? 0) &&
+                commentsTask?.id !== task.id &&
+                (ownCommentToastSuppressionRef.current.get(task.id) ?? 0) < Date.now()
+              ) {
+                showInfo(`Новый комментарий к задаче: ${task.title}`);
+              }
+            });
+          }
+        }
+
+        setTasks(nextTasks);
+      } catch (err: any) {
+        if (!options?.silent) {
+          setTasks([]);
+          setError(err?.message || "Не удалось загрузить задачи");
+        } else {
+          console.error("Failed to refresh tasks:", err);
+        }
+      } finally {
+        if (!options?.silent) {
+          setLoadingTasks(false);
+        }
+      }
+    },
+    [commentsTask, pruneCommentToastSuppression, showInfo]
+  );
   const loadCommentsForTask = useCallback(
     async (taskId: number, options?: { silent?: boolean }) => {
       if (!options?.silent) {
@@ -426,7 +507,7 @@ export default function TasksWorkspacePage() {
         const result = await apiJson<{ comments: TaskComment[] }>(
           `/api/tasks/comments?taskId=${taskId}`
         );
-        setComments(result.comments);
+        setComments(result.comments.map(normalizeTaskComment));
       } catch (err: any) {
         if (!options?.silent) {
           setError(err?.message || "Не удалось загрузить комментарии");
@@ -454,15 +535,15 @@ export default function TasksWorkspacePage() {
           `/api/tasks/signals?groupIds=${uniqueGroupIds.join(",")}`
         );
 
-        const latestByGroup = new Map<number, number>();
+        const unreadByGroup = new Map<number, number>();
         result.signals.forEach((signal) => {
-          latestByGroup.set(signal.groupId, toTimestamp(signal.latestActivityAt));
+          unreadByGroup.set(signal.groupId, signal.unreadCount ?? 0);
         });
 
-        setQueueActivityByGroup((prev) => {
+        setQueueUnreadCountByGroup((prev) => {
           const next = { ...prev };
           uniqueGroupIds.forEach((groupId) => {
-            next[groupId] = latestByGroup.get(groupId) ?? 0;
+            next[groupId] = unreadByGroup.get(groupId) ?? 0;
           });
           return next;
         });
@@ -496,18 +577,29 @@ export default function TasksWorkspacePage() {
     [loadQueueSignalsForGroups]
   );
 
-  const scheduleCommentsRefresh = useCallback(
-    (taskId: number) => {
-      if (!taskId || commentsTaskIdRef.current !== taskId) return;
-      if (commentsRefreshTimerRef.current !== null) return;
+  const markQueueSignalsSeen = useCallback(
+    async (groupId: number) => {
+      if (!Number.isFinite(groupId) || groupId <= 0) return;
+      if (markingQueueSignalsSeenRef.current.has(groupId)) return;
 
-      commentsRefreshTimerRef.current = window.setTimeout(() => {
-        commentsRefreshTimerRef.current = null;
-        if (commentsTaskIdRef.current !== taskId) return;
-        void loadCommentsForTask(taskId, { silent: true });
-      }, 150);
+      markingQueueSignalsSeenRef.current.add(groupId);
+      setQueueUnreadCountByGroup((prev) =>
+        (prev[groupId] ?? 0) > 0 ? { ...prev, [groupId]: 0 } : prev
+      );
+
+      try {
+        await apiJson<{ success: boolean }>("/api/tasks/signals/seen", {
+          method: "POST",
+          body: JSON.stringify({ groupId }),
+        });
+      } catch (error) {
+        console.error(`Failed to mark queue signals as seen for group ${groupId}:`, error);
+        scheduleQueueSignalsRefresh([groupId]);
+      } finally {
+        markingQueueSignalsSeenRef.current.delete(groupId);
+      }
     },
-    [loadCommentsForTask]
+    [scheduleQueueSignalsRefresh]
   );
 
   const loadBootstrap = useCallback(async () => {
@@ -519,15 +611,22 @@ export default function TasksWorkspacePage() {
         apiJson<{ groups: TaskGroup[] }>("/api/task-groups"),
       ]);
 
-      setMe(meRes.user);
-      setGroups(groupsRes.groups);
+      const nextUser = normalizeCurrentUser(meRes.user);
+      const nextGroups = groupsRes.groups.map(normalizeTaskGroup);
 
-      if (groupsRes.groups.length === 0) {
+      setMe(nextUser);
+      setGroups(nextGroups);
+
+      if (nextGroups.length === 0) {
         setActiveGroupId(null);
         return;
       }
 
-      const validIds = new Set(groupsRes.groups.map((group) => group.id));
+      const validIds = new Set(
+        nextGroups
+          .map((group) => Number(group.id))
+          .filter((groupId) => Number.isFinite(groupId) && groupId > 0)
+      );
       const urlGroupId = Number(new URL(window.location.href).searchParams.get("groupId"));
       const localStored = Number(localStorage.getItem("tasks.activeGroupId"));
 
@@ -536,7 +635,7 @@ export default function TasksWorkspacePage() {
           ? urlGroupId
           : Number.isFinite(localStored) && validIds.has(localStored)
             ? localStored
-            : groupsRes.groups[0].id;
+            : nextGroups[0].id;
 
       setActiveGroupId(nextGroupId);
     } catch (err: any) {
@@ -572,31 +671,12 @@ export default function TasksWorkspacePage() {
   }, [activeGroupId, groups, loadMembers, loadQueueSignalsForGroups, loadTasks]);
 
   useEffect(() => {
-    if (!me) {
-      setSeenQueueAtByGroup({});
-      return;
-    }
-
-    const next: Record<number, number> = {};
-    groups.forEach((group) => {
-      const stored = Number(localStorage.getItem(getQueueSeenStorageKey(me.id, group.id)));
-      next[group.id] = Number.isFinite(stored) ? stored : 0;
-    });
-    setSeenQueueAtByGroup(next);
-  }, [groups, me]);
-
-  useEffect(() => {
-    if (!activeGroupId) return;
-    setQueueActivityByGroup((prev) => ({ ...prev, [activeGroupId]: latestMyQueueActivityAt }));
-  }, [activeGroupId, latestMyQueueActivityAt]);
-
-  useEffect(() => {
     if (!activeGroupId) return;
 
     const refreshCurrentView = async () => {
       if (typeof document !== "undefined" && document.hidden) return;
       await Promise.all([
-        loadTasks(activeGroupId, { silent: true }),
+        loadTasks(activeGroupId, { silent: true, detectIncoming: true }),
         loadQueueSignalsForGroups(groups.map((group) => group.id)),
       ]);
     };
@@ -616,90 +696,49 @@ export default function TasksWorkspacePage() {
   }, [activeGroupId, groups, loadQueueSignalsForGroups, loadTasks]);
 
   useEffect(() => {
-    if (!me || groups.length === 0) return;
+    if (!activeGroupId || groups.length === 0) return;
 
     const groupIds = groups.map((group) => group.id);
-    const eventSource = new EventSource(`/api/tasks/stream?groupIds=${groupIds.join(",")}`);
-
-    const handleReady = () => {
-      scheduleQueueSignalsRefresh(groupIds);
+    const pollCurrentView = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void loadTasks(activeGroupId, { silent: true, detectIncoming: true });
     };
 
-    const handleTaskEvent = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as TaskStreamEvent;
-        if (!payload?.groupId || !payload?.taskId) return;
+    const intervalId = window.setInterval(pollCurrentView, TASKS_POLL_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [activeGroupId, groups, loadTasks]);
 
-        const isIncomingForMe =
-          Boolean(me?.id) && payload.assigneeId === me?.id && payload.actorId !== me?.id;
+  useEffect(() => {
+    if (groups.length === 0) return;
 
-        scheduleQueueSignalsRefresh([payload.groupId]);
-
-        if (payload.groupId === activeGroupIdRef.current && payload.task) {
-          upsertTaskInState(payload.task);
-        } else if (payload.groupId === activeGroupIdRef.current) {
-          void loadTasks(payload.groupId, { silent: true });
-        }
-
-        if (payload.type === "task_transferred" && isIncomingForMe) {
-          showInfo(
-            payload.task?.title
-              ? `Вам передали задачу: ${payload.task.title}`
-              : "Вам передали новую задачу"
-          );
-        }
-
-        if (payload.type === "task_comment_added") {
-          if (isIncomingForMe && commentsTaskIdRef.current !== payload.taskId) {
-            showInfo(
-              payload.task?.title
-                ? `Новый комментарий к задаче: ${payload.task.title}`
-                : "К вашей задаче добавлен новый комментарий"
-            );
-          }
-          scheduleCommentsRefresh(payload.taskId);
-        }
-      } catch (error) {
-        console.error("Failed to handle task stream event:", error);
-      }
+    const groupIds = groups.map((group) => group.id);
+    const pollGroupSignals = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void loadQueueSignalsForGroups(groupIds);
     };
 
-    eventSource.addEventListener("ready", handleReady as EventListener);
-    eventSource.addEventListener("task", handleTaskEvent as EventListener);
+    const intervalId = window.setInterval(pollGroupSignals, GROUP_SIGNALS_POLL_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [groups, loadQueueSignalsForGroups]);
 
-    return () => {
-      eventSource.removeEventListener("ready", handleReady as EventListener);
-      eventSource.removeEventListener("task", handleTaskEvent as EventListener);
-      eventSource.close();
-    };
-  }, [
-    groups,
-    loadTasks,
-    me,
-    scheduleCommentsRefresh,
-    scheduleQueueSignalsRefresh,
-    showInfo,
-    upsertTaskInState,
-  ]);
+  useEffect(() => {
+    if (!commentsTask) return;
+
+    const intervalId = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void loadCommentsForTask(commentsTask.id, { silent: true });
+    }, COMMENTS_POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [commentsTask, loadCommentsForTask]);
 
   useEffect(() => {
     if (!me || !activeGroupId) return;
     if (activeBucket !== "queue" || selectedMemberId !== me.id) return;
+    if ((queueUnreadCountByGroup[activeGroupId] ?? 0) <= 0) return;
 
-    const seenAt = queueActivityByGroup[activeGroupId] ?? latestMyQueueActivityAt;
-    if (seenAt <= (seenQueueAtByGroup[activeGroupId] ?? 0)) return;
-
-    setSeenQueueAtByGroup((prev) => ({ ...prev, [activeGroupId]: seenAt }));
-    localStorage.setItem(getQueueSeenStorageKey(me.id, activeGroupId), String(seenAt));
-  }, [
-    activeGroupId,
-    activeBucket,
-    latestMyQueueActivityAt,
-    me,
-    queueActivityByGroup,
-    seenQueueAtByGroup,
-    selectedMemberId,
-  ]);
+    void markQueueSignalsSeen(activeGroupId);
+  }, [activeGroupId, activeBucket, markQueueSignalsSeen, me, queueUnreadCountByGroup, selectedMemberId]);
 
   useEffect(() => {
     if (members.length === 0) {
@@ -742,7 +781,7 @@ export default function TasksWorkspacePage() {
       setCreatePriority("medium");
       setActiveBucket("queue");
       setSelectedMemberId(me.id);
-      upsertTaskInState(result.task);
+      upsertTaskInState(normalizeTaskItem(result.task));
       scheduleQueueSignalsRefresh([activeGroupId]);
       setMessage("Задача создана и добавлена во вкладку «В очереди»");
     } catch (err: any) {
@@ -763,7 +802,7 @@ export default function TasksWorkspacePage() {
         method: "POST",
         body: JSON.stringify({ taskId: task.id, status: nextStatus }),
       });
-      upsertTaskInState(result.task);
+      upsertTaskInState(normalizeTaskItem(result.task));
       scheduleQueueSignalsRefresh([result.task.group_id]);
       setMessage("Статус задачи обновлен");
     } catch (err: any) {
@@ -784,7 +823,7 @@ export default function TasksWorkspacePage() {
         method: "PUT",
         body: JSON.stringify({ id: task.id, priority: nextPriority }),
       });
-      upsertTaskInState(result.task);
+      upsertTaskInState(normalizeTaskItem(result.task));
       setMessage("Приоритет задачи обновлен");
     } catch (err: any) {
       setError(err?.message || "Не удалось изменить приоритет задачи");
@@ -824,7 +863,7 @@ export default function TasksWorkspacePage() {
           comment: transferComment.trim(),
         }),
       });
-      upsertTaskInState(result.task);
+      upsertTaskInState(normalizeTaskItem(result.task));
       scheduleQueueSignalsRefresh([result.task.group_id]);
       setTransferTask(null);
       setMessage("Задача передана и возвращена в очередь");
@@ -836,6 +875,8 @@ export default function TasksWorkspacePage() {
   };
 
   const openCommentsModal = async (task: TaskItem) => {
+    setLoadingComments(true);
+    pendingCommentsScrollRef.current = true;
     setCommentsTask(task);
     setComments([]);
     setCommentDraft("");
@@ -861,10 +902,15 @@ export default function TasksWorkspacePage() {
           body: JSON.stringify({ taskId: commentsTask.id, body: commentDraft.trim() }),
         }
       );
-      setComments((prev) => [...prev, result.comment]);
+      pendingCommentsScrollRef.current = true;
+      setComments((prev) => [...prev, normalizeTaskComment(result.comment)]);
       setCommentDraft("");
+      ownCommentToastSuppressionRef.current.set(
+        commentsTask.id,
+        Date.now() + COMMENT_TOAST_SUPPRESSION_MS
+      );
       if (result.task) {
-        upsertTaskInState(result.task);
+        upsertTaskInState(normalizeTaskItem(result.task));
         scheduleQueueSignalsRefresh([result.task.group_id]);
       }
       setMessage("Комментарий добавлен");
@@ -940,8 +986,7 @@ export default function TasksWorkspacePage() {
               <div className="inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1">
                 {groups.map((group) => {
                   const hasUnreadGroupSignal =
-                    (queueActivityByGroup[group.id] ?? 0) > (seenQueueAtByGroup[group.id] ?? 0) &&
-                    activeGroupId !== group.id;
+                    (queueUnreadCountByGroup[group.id] ?? 0) > 0 && activeGroupId !== group.id;
 
                   return (
                     <button
@@ -1340,13 +1385,17 @@ export default function TasksWorkspacePage() {
               <button
                 type="button"
                 onClick={() => setCommentsTask(null)}
-                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+                aria-label="Закрыть комментарии"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
               >
-                Закрыть
+                <CloseIcon />
               </button>
             </div>
 
-            <div className="mt-4 max-h-[340px] min-h-[220px] space-y-3 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
+            <div
+              ref={commentsViewportRef}
+              className="mt-4 max-h-[340px] min-h-[220px] space-y-3 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3"
+            >
               {loadingComments ? (
                 <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-slate-500">
                   Загрузка комментариев...
@@ -1362,7 +1411,18 @@ export default function TasksWorkspacePage() {
                       <div className="text-sm font-medium text-slate-900">{comment.author_name}</div>
                       <div className="text-xs text-slate-400">{formatDateTime(comment.created_at)}</div>
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">@{comment.author_username}</div>
+                    <div className="mt-2">
+                      <span
+                        className={cls(
+                          "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
+                          comment.kind === "transfer"
+                            ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                            : "bg-slate-100 text-slate-600"
+                        )}
+                      >
+                        {comment.kind === "transfer" ? "Передача" : "Комментарий"}
+                      </span>
+                    </div>
                     <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{comment.body}</p>
                   </article>
                 ))

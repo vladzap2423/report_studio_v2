@@ -23,7 +23,7 @@ function parseRole(value: unknown): UserRole | null {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireApiRole(request, "admin");
+  const auth = await requireApiRole(request, "god");
   if (auth.response) return auth.response;
 
   try {
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireApiRole(request, "admin");
+  const auth = await requireApiRole(request, "god");
   if (auth.response) return auth.response;
 
   try {
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const auth = await requireApiRole(request, "admin");
+  const auth = await requireApiRole(request, "god");
   if (auth.response) return auth.response;
 
   try {
@@ -159,7 +159,7 @@ export async function DELETE(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const auth = await requireApiRole(request, "admin");
+  const auth = await requireApiRole(request, "god");
   if (auth.response) return auth.response;
 
   try {

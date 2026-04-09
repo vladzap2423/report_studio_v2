@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { UserRole } from "@/lib/roles";
@@ -44,15 +44,35 @@ function cls(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
-function getMembersLabel(count: number) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
+function normalizeId(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
 
-  if (mod10 === 1 && mod100 !== 11) return `${count} участник`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return `${count} участника`;
-  }
-  return `${count} участников`;
+function normalizeCurrentUser(user: CurrentUser | null) {
+  return user ? { ...user, id: normalizeId(user.id) } : null;
+}
+
+function normalizeTaskGroup(group: TaskGroup): TaskGroup {
+  return {
+    ...group,
+    id: normalizeId(group.id),
+    created_by: group.created_by == null ? null : normalizeId(group.created_by),
+  };
+}
+
+function normalizeGroupMember(member: GroupMember): GroupMember {
+  return {
+    ...member,
+    id: normalizeId(member.id),
+  };
+}
+
+function normalizeUserItem(user: UserItem): UserItem {
+  return {
+    ...user,
+    id: normalizeId(user.id),
+  };
 }
 
 async function parseJson<T>(response: Response): Promise<T | null> {
@@ -71,6 +91,21 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
     >
       <path
         d="M7 5l5 5-5 5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4">
+      <path
+        d="M5 5l10 10M15 5L5 15"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -108,16 +143,14 @@ export default function TaskGroupsAdminPanel() {
     clearMessage: () => setMessage(null),
   });
 
-  const canManage = me?.role === "admin" || me?.role === "god";
+  const canManage = me?.role === "god";
 
   const loadMe = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/me", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await parseJson<{ user?: { id: number; role: UserRole } | null }>(res)) || null;
-      if (data?.user) {
-        setMe({ id: data.user.id, role: data.user.role });
-      }
+      const data = (await parseJson<{ user?: CurrentUser | null }>(res)) || null;
+      setMe(normalizeCurrentUser(data?.user || null));
     } catch {
       // ignore
     }
@@ -133,7 +166,7 @@ export default function TaskGroupsAdminPanel() {
         throw new Error(body?.error || "Не удалось загрузить группы");
       }
 
-      const nextGroups = Array.isArray(body?.groups) ? body.groups : [];
+      const nextGroups = Array.isArray(body?.groups) ? body.groups.map(normalizeTaskGroup) : [];
       const nextIds = new Set(nextGroups.map((group) => group.id));
 
       setGroups(nextGroups);
@@ -147,14 +180,12 @@ export default function TaskGroupsAdminPanel() {
         });
         return next;
       });
-      setExpandedGroupId((prev) => {
-        if (prev && nextGroups.some((group) => group.id === prev)) return prev;
-        return nextGroups[0]?.id ?? null;
-      });
-      setEditingGroupId((prev) => {
-        if (prev && nextGroups.some((group) => group.id === prev)) return prev;
-        return null;
-      });
+      setExpandedGroupId((prev) =>
+        prev && nextGroups.some((group) => group.id === prev) ? prev : null
+      );
+      setEditingGroupId((prev) =>
+        prev && nextGroups.some((group) => group.id === prev) ? prev : null
+      );
     } catch (e: any) {
       setGroups([]);
       setMembersByGroup({});
@@ -173,43 +204,40 @@ export default function TaskGroupsAdminPanel() {
       if (!res.ok) {
         throw new Error(body?.error || "Не удалось загрузить пользователей");
       }
-      setUsers(Array.isArray(body?.users) ? body.users : []);
+      setUsers(Array.isArray(body?.users) ? body.users.map(normalizeUserItem) : []);
     } catch (e: any) {
       setUsers([]);
       setError(e?.message || "Не удалось загрузить пользователей");
     }
   }, []);
 
-  const loadGroupMembers = useCallback(
-    async (groupId: number, options?: { silent?: boolean }) => {
-      const silent = options?.silent === true;
-      if (!silent) {
-        setLoadingMembersGroupId(groupId);
-      }
+  const loadGroupMembers = useCallback(async (groupId: number, options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoadingMembersGroupId(groupId);
+    }
 
-      try {
-        const res = await fetch(`/api/task-groups/members?groupId=${groupId}`, {
-          cache: "no-store",
-        });
-        const body = await parseJson<{ error?: string; members?: GroupMember[] }>(res);
-        if (!res.ok) {
-          throw new Error(body?.error || "Не удалось загрузить участников");
-        }
-        const members = Array.isArray(body?.members) ? body.members : [];
-        setMembersByGroup((prev) => ({ ...prev, [groupId]: members }));
-        return members;
-      } catch (e: any) {
-        setMembersByGroup((prev) => ({ ...prev, [groupId]: [] }));
-        setError(e?.message || "Не удалось загрузить участников");
-        return [] as GroupMember[];
-      } finally {
-        if (!silent) {
-          setLoadingMembersGroupId((prev) => (prev === groupId ? null : prev));
-        }
+    try {
+      const res = await fetch(`/api/task-groups/members?groupId=${groupId}`, {
+        cache: "no-store",
+      });
+      const body = await parseJson<{ error?: string; members?: GroupMember[] }>(res);
+      if (!res.ok) {
+        throw new Error(body?.error || "Не удалось загрузить участников");
       }
-    },
-    []
-  );
+      const members = Array.isArray(body?.members) ? body.members.map(normalizeGroupMember) : [];
+      setMembersByGroup((prev) => ({ ...prev, [groupId]: members }));
+      return members;
+    } catch (e: any) {
+      setMembersByGroup((prev) => ({ ...prev, [groupId]: [] }));
+      setError(e?.message || "Не удалось загрузить участников");
+      return [] as GroupMember[];
+    } finally {
+      if (!silent) {
+        setLoadingMembersGroupId((prev) => (prev === groupId ? null : prev));
+      }
+    }
+  }, []);
 
   useEffect(() => {
     void loadMe();
@@ -225,21 +253,9 @@ export default function TaskGroupsAdminPanel() {
   }, [canManage, loadUsers]);
 
   useEffect(() => {
-    if (!expandedGroupId) {
-      setEditingGroupId(null);
-      setDraftMemberIds([]);
-      setMemberSearch("");
-      return;
-    }
+    if (!expandedGroupId) return;
     void loadGroupMembers(expandedGroupId);
   }, [expandedGroupId, loadGroupMembers]);
-
-  const selectedUsers = useMemo(() => {
-    const checked = new Set(draftMemberIds);
-    return users
-      .filter((user) => checked.has(user.id))
-      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [draftMemberIds, users]);
 
   const filteredUsers = useMemo(() => {
     if (!editingGroupId) return [];
@@ -250,7 +266,7 @@ export default function TaskGroupsAdminPanel() {
     return [...users]
       .filter((user) => {
         if (!query) return true;
-        const haystack = `${user.name} ${user.username} ${ROLE_LABELS[user.role]}`.toLowerCase();
+        const haystack = `${user.name} ${user.username}`.toLowerCase();
         return haystack.includes(query);
       })
       .sort((a, b) => {
@@ -266,6 +282,11 @@ export default function TaskGroupsAdminPanel() {
     if (currentIds.size !== draftMemberIds.length) return true;
     return draftMemberIds.some((id) => !currentIds.has(id));
   }, [draftMemberIds, editingGroupId, membersByGroup]);
+
+  const editingGroup = useMemo(
+    () => groups.find((group) => group.id === editingGroupId) || null,
+    [editingGroupId, groups]
+  );
 
   const createGroup = async () => {
     if (!canManage) return;
@@ -286,21 +307,15 @@ export default function TaskGroupsAdminPanel() {
           description: newGroupDescription.trim(),
         }),
       });
-      const body = await parseJson<{ error?: string; group?: TaskGroup }>(res);
+      const body = await parseJson<{ error?: string }>(res);
       if (!res.ok) {
         throw new Error(body?.error || "Не удалось создать группу");
       }
 
-      const createdGroupId = body?.group?.id ?? null;
       setNewGroupName("");
       setNewGroupDescription("");
       setMessage("Группа создана");
       await loadGroups();
-
-      if (createdGroupId) {
-        setExpandedGroupId(createdGroupId);
-        void loadGroupMembers(createdGroupId, { silent: true });
-      }
     } catch (e: any) {
       setError(e?.message || "Не удалось создать группу");
     } finally {
@@ -326,7 +341,7 @@ export default function TaskGroupsAdminPanel() {
       setGroups((prev) =>
         prev.map((item) => (item.id === group.id ? { ...item, is_active: nextActive } : item))
       );
-      setMessage(nextActive ? "Группа активирована" : "Группа деактивирована");
+      setMessage(nextActive ? "Группа активирована" : "Группа отключена");
     } catch (e: any) {
       setError(e?.message || "Не удалось обновить группу");
     } finally {
@@ -335,15 +350,7 @@ export default function TaskGroupsAdminPanel() {
   };
 
   const toggleExpandedGroup = (groupId: number) => {
-    setExpandedGroupId((prev) => {
-      const next = prev === groupId ? null : groupId;
-      if (next !== groupId) {
-        setEditingGroupId(null);
-        setDraftMemberIds([]);
-        setMemberSearch("");
-      }
-      return next;
-    });
+    setExpandedGroupId((prev) => (prev === groupId ? null : groupId));
   };
 
   const openMemberEditor = async (groupId: number) => {
@@ -351,8 +358,6 @@ export default function TaskGroupsAdminPanel() {
 
     setError(null);
     setMessage(null);
-    setExpandedGroupId(groupId);
-
     const currentMembers = membersByGroup[groupId] ?? (await loadGroupMembers(groupId, { silent: true }));
     setEditingGroupId(groupId);
     setDraftMemberIds(currentMembers.map((member) => member.id));
@@ -425,7 +430,7 @@ export default function TaskGroupsAdminPanel() {
       <div className="mx-auto max-w-6xl">
         {!canManage && (
           <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            Управление группами и участниками доступно только пользователям с ролями admin или god.
+            Управление группами и участниками доступно только пользователю с ролью god.
           </div>
         )}
 
@@ -433,7 +438,7 @@ export default function TaskGroupsAdminPanel() {
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-slate-900">Создание новой группы</div>
-              <div className="text-xs text-slate-500">Новая группа сразу появится в общем списке ниже.</div>
+              <div className="text-xs text-slate-500">Новая группа появится в списке ниже.</div>
             </div>
           </div>
 
@@ -475,10 +480,8 @@ export default function TaskGroupsAdminPanel() {
           <div className="space-y-3">
             {groups.map((group) => {
               const expanded = expandedGroupId === group.id;
-              const isEditing = editingGroupId === group.id;
               const isLoadingMembers = loadingMembersGroupId === group.id;
               const groupMembers = membersByGroup[group.id] ?? [];
-              const groupMembersLabel = getMembersLabel(groupMembers.length);
 
               return (
                 <article
@@ -518,11 +521,6 @@ export default function TaskGroupsAdminPanel() {
                           >
                             {group.is_active ? "Активна" : "Отключена"}
                           </span>
-                          {group.id in membersByGroup && (
-                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-500">
-                              {groupMembersLabel}
-                            </span>
-                          )}
                         </div>
                         <div className="mt-1 text-sm text-slate-500">
                           {group.description || "Описание группы не указано"}
@@ -562,11 +560,15 @@ export default function TaskGroupsAdminPanel() {
                         <div>
                           <div className="text-sm font-semibold text-slate-900">Состав группы</div>
                           <div className="text-xs text-slate-500">
-                            {isLoadingMembers ? "Загрузка участников..." : groupMembersLabel}
+                            {isLoadingMembers
+                              ? "Загрузка участников..."
+                              : groupMembers.length > 0
+                                ? "Добавленные пользователи группы"
+                                : "Пока нет добавленных участников"}
                           </div>
                         </div>
 
-                        {canManage && !isEditing && (
+                        {canManage && (
                           <button
                             type="button"
                             onClick={() => void openMemberEditor(group.id)}
@@ -581,121 +583,6 @@ export default function TaskGroupsAdminPanel() {
                       {isLoadingMembers ? (
                         <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white/80 px-4 py-6 text-sm text-slate-500">
                           Загрузка участников...
-                        </div>
-                      ) : isEditing ? (
-                        <div className="mt-4 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-                          <div className="rounded-3xl border border-slate-200 bg-white p-4">
-                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                              Выбрано
-                            </div>
-                            <div className="mt-2 text-sm text-slate-500">
-                              {selectedUsers.length > 0
-                                ? `${selectedUsers.length} из ${users.length} пользователей в группе`
-                                : "Пока никто не выбран"}
-                            </div>
-
-                            <div className="mt-4 flex max-h-[320px] flex-wrap gap-2 overflow-auto pr-1">
-                              {selectedUsers.length > 0 ? (
-                                selectedUsers.map((user) => (
-                                  <span
-                                    key={user.id}
-                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700"
-                                  >
-                                    <span>{user.name}</span>
-                                    <span className="text-slate-400">@{user.username}</span>
-                                  </span>
-                                ))
-                              ) : (
-                                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-400">
-                                  Отметьте пользователей справа, чтобы добавить их в группу.
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="mt-4 flex gap-2">
-                              <button
-                                type="button"
-                                onClick={() => void saveMemberSelection(group.id)}
-                                disabled={saving || !hasDraftChanges}
-                                className="flex-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Сохранить состав
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelMemberEditor}
-                                disabled={saving}
-                                className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                Отмена
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="rounded-3xl border border-slate-200 bg-white p-4">
-                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                              <div>
-                                <div className="text-sm font-semibold text-slate-900">Все пользователи</div>
-                                <div className="text-xs text-slate-500">
-                                  Отмечайте галочками тех, кто должен входить в группу.
-                                </div>
-                              </div>
-                              <input
-                                value={memberSearch}
-                                onChange={(event) => setMemberSearch(event.target.value)}
-                                placeholder="Поиск по имени, логину или роли"
-                                className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white md:max-w-xs"
-                              />
-                            </div>
-
-                            <div className="mt-4 max-h-[420px] space-y-2 overflow-auto pr-1">
-                              {filteredUsers.length === 0 ? (
-                                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                                  Нет пользователей, подходящих под текущий поиск.
-                                </div>
-                              ) : (
-                                filteredUsers.map((user) => {
-                                  const checked = draftMemberIds.includes(user.id);
-                                  return (
-                                    <label
-                                      key={user.id}
-                                      className={cls(
-                                        "flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition",
-                                        checked
-                                          ? "border-slate-900 bg-slate-900 text-white"
-                                          : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100"
-                                      )}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={() => toggleDraftMember(user.id)}
-                                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
-                                      />
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <div className="text-sm font-medium">{user.name}</div>
-                                          <span
-                                            className={cls(
-                                              "rounded-full border px-2 py-0.5 text-[11px]",
-                                              checked
-                                                ? "border-white/25 text-white/80"
-                                                : "border-slate-200 bg-white text-slate-500"
-                                            )}
-                                          >
-                                            {ROLE_LABELS[user.role]}
-                                          </span>
-                                        </div>
-                                        <div className={cls("mt-1 text-xs", checked ? "text-white/70" : "text-slate-500")}>
-                                          @{user.username}
-                                        </div>
-                                      </div>
-                                    </label>
-                                  );
-                                })
-                              )}
-                            </div>
-                          </div>
                         </div>
                       ) : groupMembers.length === 0 ? (
                         <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white/80 px-4 py-6 text-sm text-slate-500">
@@ -731,6 +618,102 @@ export default function TaskGroupsAdminPanel() {
           </div>
         )}
       </div>
+
+      {editingGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4">
+          <div className="flex w-full max-w-3xl flex-col rounded-[28px] border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-base font-semibold text-slate-900">Изменение состава группы</div>
+                <div className="mt-1 text-sm text-slate-500">{editingGroup.name}</div>
+              </div>
+              <button
+                type="button"
+                onClick={cancelMemberEditor}
+                aria-label="Закрыть окно изменения состава"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="text-sm text-slate-500">
+                Отметьте пользователей, которые должны входить в группу.
+              </div>
+              <div className="text-sm font-medium text-slate-700">Выбрано: {draftMemberIds.length}</div>
+            </div>
+
+            <div className="mt-4">
+              <input
+                value={memberSearch}
+                onChange={(event) => setMemberSearch(event.target.value)}
+                placeholder="Поиск по ФИО или username"
+                className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white"
+              />
+            </div>
+
+            <div className="mt-4 max-h-[460px] space-y-2 overflow-auto pr-1">
+              {filteredUsers.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  Пользователи по текущему поиску не найдены.
+                </div>
+              ) : (
+                filteredUsers.map((user) => {
+                  const checked = draftMemberIds.includes(user.id);
+                  return (
+                    <label
+                      key={user.id}
+                      className={cls(
+                        "flex cursor-pointer items-center justify-between gap-4 rounded-2xl border px-4 py-3 transition",
+                        checked
+                          ? "border-slate-900 bg-slate-50"
+                          : "border-slate-200 bg-white hover:bg-slate-50"
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-medium text-slate-900">{user.name}</div>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500">
+                            {ROLE_LABELS[user.role]}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">@{user.username}</div>
+                      </div>
+
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleDraftMember(user.id)}
+                        className="h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                      />
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelMemberEditor}
+                disabled={saving}
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveMemberSelection(editingGroup.id)}
+                disabled={saving || !hasDraftChanges}
+                className="rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

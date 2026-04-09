@@ -4,10 +4,14 @@ import { requireApiRole } from "@/lib/require-api-role";
 import { appendTaskHistory, getTaskById, getTaskWithMetaById, userCanAccessTaskGroup } from "@/lib/tasks";
 import { publishTaskEvent } from "@/lib/task-events";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type TaskCommentRow = {
   id: number;
   task_id: number;
   author_id: number;
+  kind: string;
   body: string;
   created_at: string;
   author_name: string;
@@ -46,6 +50,7 @@ export async function GET(request: NextRequest) {
           c.id,
           c.task_id,
           c.author_id,
+          c.kind,
           c.body,
           c.created_at,
           u.name AS author_name,
@@ -96,6 +101,7 @@ export async function POST(request: NextRequest) {
           id,
           task_id,
           author_id,
+          kind,
           body,
           created_at,
           ''::text AS author_name,
@@ -124,6 +130,7 @@ export async function POST(request: NextRequest) {
           c.id,
           c.task_id,
           c.author_id,
+          c.kind,
           c.body,
           c.created_at,
           u.name AS author_name,

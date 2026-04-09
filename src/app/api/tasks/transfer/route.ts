@@ -4,7 +4,6 @@ import { requireApiRole } from "@/lib/require-api-role";
 import {
   appendTaskHistory,
   getTaskById,
-  getTaskGroupMembers,
   getTaskWithMetaById,
   isTaskGroupMember,
   userCanAccessTaskGroup,
@@ -76,20 +75,21 @@ export async function POST(request: NextRequest) {
       [assigneeId, taskId]
     );
 
-    const members = await getTaskGroupMembers(task.group_id);
-    const fromMember = members.find((m) => m.id === task.assignee_id);
-    const toMember = members.find((m) => m.id === assigneeId);
-
-    const systemBody =
-      `Передача задачи: ${fromMember?.name || "Не назначен"} -> ${toMember?.name || assigneeId}. ` +
-      `Статус сброшен в «В очереди». Причина: ${comment}`;
+    await dbQuery(
+      `
+        INSERT INTO task_comments(task_id, author_id, kind, body)
+        VALUES ($1, $2, 'transfer', $3)
+      `,
+      [taskId, auth.user.id, comment]
+    );
 
     await dbQuery(
       `
-        INSERT INTO task_comments(task_id, author_id, body)
-        VALUES ($1, $2, $3)
+        UPDATE tasks
+        SET comments_count = comments_count + 1
+        WHERE id = $1
       `,
-      [taskId, auth.user.id, systemBody]
+      [taskId]
     );
 
     await appendTaskHistory(
@@ -98,6 +98,14 @@ export async function POST(request: NextRequest) {
       "transfer",
       { assignee_id: task.assignee_id, status: task.status },
       { assignee_id: assigneeId, status: "new", comment }
+    );
+
+    await dbQuery(
+      `
+        INSERT INTO task_notifications(user_id, task_id, group_id, kind, actor_id)
+        VALUES ($1, $2, $3, 'transfer', $4)
+      `,
+      [assigneeId, taskId, task.group_id, auth.user.id]
     );
 
     const taskWithMeta = await getTaskWithMetaById(taskId);

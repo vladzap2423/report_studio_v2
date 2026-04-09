@@ -3,8 +3,11 @@ import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
 import { getAccessibleTaskGroups, type TaskGroupRow } from "@/lib/tasks";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function canManageTaskGroups(role: string) {
-  return role === "admin" || role === "god";
+  return role === "god";
 }
 
 export async function GET(request: NextRequest) {
