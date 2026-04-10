@@ -76,6 +76,15 @@ async function createSchema() {
   `);
 
   await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'report_run_status') THEN
+        CREATE TYPE report_run_status AS ENUM ('queued', 'running', 'done', 'failed', 'canceled');
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -182,6 +191,25 @@ async function createSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS report_runs (
+      id BIGSERIAL PRIMARY KEY,
+      report_id TEXT NOT NULL,
+      report_title TEXT,
+      created_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      input_name TEXT NOT NULL,
+      status report_run_status NOT NULL DEFAULT 'queued',
+      work_dir TEXT,
+      output_name TEXT,
+      output_path TEXT,
+      error_text TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      started_at TIMESTAMPTZ,
+      finished_at TIMESTAMPTZ,
+      canceled_at TIMESTAMPTZ
+    );
+  `);
+
+  await pool.query(`
     ALTER TABLE services
     ADD COLUMN IF NOT EXISTS name TEXT;
   `);
@@ -235,6 +263,8 @@ async function createSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_history_task_created ON task_history(task_id, created_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_notifications_user_seen_group ON task_notifications(user_id, is_seen, group_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_notifications_task_kind ON task_notifications(task_id, kind);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_report_runs_created_by_created_at ON report_runs(created_by, created_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_report_runs_created_by_status ON report_runs(created_by, status);`);
 }
 
 async function seedDefaultGodUser() {
