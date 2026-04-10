@@ -5,17 +5,62 @@ import { requireApiRole } from "@/lib/require-api-role";
 
 export const runtime = "nodejs";
 
-function normalizeReportId(raw: string) {
-  const s = String(raw || "").trim();
-  return s.replace(/[^a-zA-Z0-9_-]/g, "");
+type OutputFormat = "xlsx" | "zip";
+type ResultKind = "single" | "multiple";
+
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  а: "a",
+  б: "b",
+  в: "v",
+  г: "g",
+  д: "d",
+  е: "e",
+  ё: "e",
+  ж: "zh",
+  з: "z",
+  и: "i",
+  й: "y",
+  к: "k",
+  л: "l",
+  м: "m",
+  н: "n",
+  о: "o",
+  п: "p",
+  р: "r",
+  с: "s",
+  т: "t",
+  у: "u",
+  ф: "f",
+  х: "h",
+  ц: "ts",
+  ч: "ch",
+  ш: "sh",
+  щ: "sch",
+  ъ: "",
+  ы: "y",
+  ь: "",
+  э: "e",
+  ю: "yu",
+  я: "ya",
+};
+
+function deriveReportId(title: string) {
+  const transliterated = Array.from(String(title || "").trim().toLowerCase())
+    .map((char) => CYRILLIC_TO_LATIN[char] ?? char)
+    .join("");
+
+  const cleaned = transliterated
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+
+  return cleaned || `report_${Date.now()}`;
 }
 
-function safeRelativePath(input: string) {
-  const cleaned = input.replace(/^[\\/]+/, "");
-  const normalized = path.normalize(cleaned);
-  if (path.isAbsolute(normalized)) return null;
-  if (normalized.split(path.sep).includes("..")) return null;
-  return normalized;
+function normalizeResultKind(raw: string): ResultKind | null {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "single" || value === "multiple") return value;
+  return null;
 }
 
 async function exists(p: string) {
@@ -32,49 +77,63 @@ export async function POST(req: NextRequest) {
   if (auth.response) return auth.response;
 
   const form = await req.formData();
-  const reportIdRaw = String(form.get("reportId") || "");
-  const reportId = normalizeReportId(reportIdRaw);
+  const title = String(form.get("title") || "").trim();
+  const description = String(form.get("description") || "").trim();
+  const resultKind = normalizeResultKind(String(form.get("resultKind") || "single"));
   const overwrite = String(form.get("overwrite") || "") === "1";
+  const script = form.get("script");
 
-  if (!reportId) {
-    return NextResponse.json({ error: "reportId is required" }, { status: 400 });
+  if (!title) {
+    return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
 
-  const files = form.getAll("files").filter((f) => f instanceof File) as File[];
-  if (!files.length) {
-    return NextResponse.json({ error: "files are required" }, { status: 400 });
+  if (!resultKind) {
+    return NextResponse.json({ error: "invalid result kind" }, { status: 400 });
   }
 
+  if (!(script instanceof File)) {
+    return NextResponse.json({ error: "script is required" }, { status: 400 });
+  }
+
+  if (!script.name.toLowerCase().endsWith(".py")) {
+    return NextResponse.json({ error: "script must be a .py file" }, { status: 400 });
+  }
+
+  const reportId = deriveReportId(title);
+  const outputFormat: OutputFormat = resultKind === "multiple" ? "zip" : "xlsx";
   const reportsRoot = path.join(process.cwd(), "reports");
   const reportDir = path.join(reportsRoot, reportId);
 
   if (await exists(reportDir)) {
     if (!overwrite) {
-      return NextResponse.json({ error: "report already exists" }, { status: 409 });
+      return NextResponse.json(
+        { error: `report already exists: ${reportId}`, reportId },
+        { status: 409 }
+      );
     }
     await fs.rm(reportDir, { recursive: true, force: true });
   }
 
   await fs.mkdir(reportDir, { recursive: true });
 
-  for (const file of files) {
-    const rel = safeRelativePath(file.name);
-    if (!rel) {
-      return NextResponse.json({ error: "invalid file path" }, { status: 400 });
-    }
+  const manifest = {
+    id: reportId,
+    title,
+    version: "1.0.0",
+    description,
+    outputs: {
+      mode: resultKind,
+      format: outputFormat,
+    },
+  };
 
-    const targetPath = path.join(reportDir, rel);
-    const resolvedTarget = path.resolve(targetPath);
-    const resolvedRoot = path.resolve(reportDir) + path.sep;
-
-    if (!resolvedTarget.startsWith(resolvedRoot)) {
-      return NextResponse.json({ error: "invalid file path" }, { status: 400 });
-    }
-
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    const buf = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(targetPath, buf);
-  }
+  const scriptBuffer = Buffer.from(await script.arrayBuffer());
+  await fs.writeFile(path.join(reportDir, "report.py"), scriptBuffer);
+  await fs.writeFile(
+    path.join(reportDir, "manifest.json"),
+    JSON.stringify(manifest, null, 2),
+    "utf8"
+  );
 
   return NextResponse.json({ ok: true, reportId });
 }

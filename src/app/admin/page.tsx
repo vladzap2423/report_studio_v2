@@ -6,12 +6,18 @@ import { SESSION_COOKIE_NAME } from "@/lib/session";
 import { getCurrentUserFromSessionToken } from "@/lib/current-user";
 import ServicesAdminPanel from "./components/ServicesAdminPanel";
 import ProfilesAdminPanel from "./components/ProfilesAdminPanel";
-import ReportUploadPanel from "./components/ReportUploadPanel";
+import ReportsManifestAdminPanel from "./components/ReportsManifestAdminPanel";
 import UsersAdminPanel from "./components/UsersAdminPanel";
 import PasswordPadAdminPage from "./components/PasswordPadAdminPage";
 import TaskGroupsAdminPanel from "./components/TaskGroupsAdminPanel";
 
-type Section = "services" | "profiles" | "reports" | "users" | "arduino" | "tasks";
+type Section =
+  | "services"
+  | "profiles"
+  | "reports"
+  | "users"
+  | "arduino"
+  | "tasks";
 
 type AdminPageProps = {
   searchParams?: Promise<{ section?: string | string[] }>;
@@ -29,11 +35,11 @@ const sectionGroups: {
   },
   {
     title: "Отчеты",
-    description: "Справочники и загрузка новых плагинов",
+    description: "Справочники и управление отчетами",
     items: [
       { id: "services", label: "Справочник услуг" },
       { id: "profiles", label: "Профили" },
-      { id: "reports", label: "Загрузка отчетов" },
+      { id: "reports", label: "Отчеты" },
     ],
   },
   {
@@ -107,7 +113,7 @@ function renderSection(section: Section) {
   if (section === "profiles") return <ProfilesAdminPanel />;
   if (section === "users") return <UsersAdminPanel />;
   if (section === "tasks") return <TaskGroupsAdminPanel />;
-  if (section === "reports") return <ReportUploadPanel />;
+  if (section === "reports") return <ReportsManifestAdminPanel />;
   return <PasswordPadAdminPage />;
 }
 

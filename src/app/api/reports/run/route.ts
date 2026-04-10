@@ -64,15 +64,36 @@ function getPythonPath() {
   return { win, nix };
 }
 
-async function readOutputFormat(reportDir: string): Promise<"xlsx" | "zip"> {
+function sanitizeFileBaseName(raw: string, fallback: string) {
+  const cleaned = String(raw || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return cleaned || fallback;
+}
+
+function buildContentDisposition(fileName: string, fallback: string) {
+  const asciiFallback = `${fallback.replace(/[^a-zA-Z0-9._-]/g, "_") || "report"}`;
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+async function readReportMeta(reportDir: string): Promise<{
+  format: "xlsx" | "zip";
+  title: string | null;
+}> {
   const manifestPath = path.join(reportDir, "manifest.json");
   try {
     const raw = await fs.readFile(manifestPath, "utf8");
     const m = JSON.parse(raw);
     const fmt = String(m?.outputs?.format || "xlsx").toLowerCase();
-    return fmt === "zip" ? "zip" : "xlsx";
+    return {
+      format: fmt === "zip" ? "zip" : "xlsx",
+      title: typeof m?.title === "string" ? m.title : null,
+    };
   } catch {
-    return "xlsx";
+    return { format: "xlsx", title: null };
   }
 }
 
@@ -129,11 +150,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const outFormat = await readOutputFormat(reportDir);
+  const reportMeta = await readReportMeta(reportDir);
+  const outFormat = reportMeta.format;
+  const fileBaseName = sanitizeFileBaseName(reportMeta.title || reportId, reportId);
+  const outFileName = `${fileBaseName}.${outFormat}`;
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "reports-"));
   const inputPath = path.join(tmpDir, "input" + path.extname(file.name || ".xlsx"));
-  const outFileName = `${reportId}.${outFormat}`;
   const outputPath = path.join(tmpDir, outFileName);
   const servicesLookupPath = path.join(tmpDir, "services.lookup.json");
 
@@ -169,7 +192,7 @@ export async function POST(req: NextRequest) {
     return new NextResponse(out, {
       headers: {
         "Content-Type": contentTypeFor(outFormat),
-        "Content-Disposition": `attachment; filename="${outFileName}"`,
+        "Content-Disposition": buildContentDisposition(outFileName, `${reportId}.${outFormat}`),
       },
     });
   } catch (e: any) {
