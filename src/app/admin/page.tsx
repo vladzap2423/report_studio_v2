@@ -10,6 +10,7 @@ import ReportsManifestAdminPanel from "./components/ReportsManifestAdminPanel";
 import UsersAdminPanel from "./components/UsersAdminPanel";
 import PasswordPadAdminPage from "./components/PasswordPadAdminPage";
 import TaskGroupsAdminPanel from "./components/TaskGroupsAdminPanel";
+import DatabaseBackupsAdminPanel from "./components/DatabaseBackupsAdminPanel";
 
 type Section =
   | "services"
@@ -17,7 +18,8 @@ type Section =
   | "reports"
   | "users"
   | "arduino"
-  | "tasks";
+  | "tasks"
+  | "backups";
 
 type AdminPageProps = {
   searchParams?: Promise<{ section?: string | string[] }>;
@@ -50,7 +52,10 @@ const sectionGroups: {
   {
     title: "ПРОЧЕЕ",
     description: "Другие...",
-    items: [{ id: "arduino", label: "Ардуино" }],
+    items: [
+      { id: "backups", label: "Резервные копии" },
+      { id: "arduino", label: "Ардуино" },
+    ],
   },
 ];
 
@@ -61,12 +66,21 @@ function normalizeSection(input: string | null | undefined): Section | null {
   if (input === "reports") return "reports";
   if (input === "arduino") return "arduino";
   if (input === "services") return "services";
+  if (input === "backups") return "backups";
   return null;
 }
 
 function getAllowedSections(role: UserRole): Section[] {
   if (role === "god") {
-    return ["users", "services", "profiles", "reports", "tasks", "arduino"];
+    return [
+      "users",
+      "services",
+      "profiles",
+      "reports",
+      "tasks",
+      "backups",
+      "arduino",
+    ];
   }
   if (role === "admin") {
     return ["services", "profiles"];
@@ -114,6 +128,7 @@ function renderSection(section: Section) {
   if (section === "users") return <UsersAdminPanel />;
   if (section === "tasks") return <TaskGroupsAdminPanel />;
   if (section === "reports") return <ReportsManifestAdminPanel />;
+  if (section === "backups") return <DatabaseBackupsAdminPanel />;
   return <PasswordPadAdminPage />;
 }
 

@@ -1,0 +1,10 @@
+{
+  "id": "otchet_po_nalichnym",
+  "title": "Отчет по наличным",
+  "version": "1.0.0",
+  "description": "Получает входной файл и на выходе отдает файл с двумя страницами.",
+  "outputs": {
+    "mode": "single",
+    "format": "xlsx"
+  }
+}

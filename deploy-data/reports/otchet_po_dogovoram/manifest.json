@@ -1,0 +1,10 @@
+{
+  "id": "otchet_po_dogovoram",
+  "title": "Отчет по договорам",
+  "version": "1.0.0",
+  "description": "Получает входной файл и на выходе отдает файл с двумя страницами.",
+  "outputs": {
+    "mode": "single",
+    "format": "xlsx"
+  }
+}

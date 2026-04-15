@@ -47,3 +47,9 @@ certificates
 
 # local database dumps
 dumps/
+
+# uploaded task documents
+storage/task-documents/
+
+# database backups
+storage/db-backups/

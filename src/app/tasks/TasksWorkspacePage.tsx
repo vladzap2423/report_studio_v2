@@ -5,11 +5,19 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { useRouter } from "next/navigation";
 import AppSelect from "@/app/components/AppSelect";
 import { useAppToast, useToastSync } from "@/app/components/AppToastProvider";
+import DocumentDropField from "@/app/components/DocumentDropField";
+import TaskDocumentViewerModal from "@/app/tasks/TaskDocumentViewerModal";
+import TaskSigningModal from "@/app/tasks/TaskSigningModal";
+import SigningStampPlacementModal, {
+  type SigningStampTemplateValue,
+} from "@/app/tasks/SigningStampPlacementModal";
 
 type UserRole = "user" | "admin" | "god";
 type TaskStatus = "new" | "in_progress" | "blocked" | "review" | "done" | "canceled";
 type TaskPriority = "low" | "medium" | "high";
+type TaskKind = "task" | "signing";
 type TaskBucket = "in_progress" | "done" | "queue";
+type SigningPlacementMode = "last_page" | "all_pages";
 
 type CurrentUser = {
   id: number;
@@ -38,6 +46,7 @@ type TaskMember = {
 type TaskItem = {
   id: number;
   group_id: number;
+  kind: TaskKind;
   title: string;
   description: string;
   status: TaskStatus;
@@ -52,6 +61,15 @@ type TaskItem = {
   creator_name: string;
   assignee_name: string | null;
   comments_count?: number;
+  document_name?: string | null;
+  document_size?: number | null;
+  document_mime_type?: string | null;
+  signer_count?: number;
+  signed_count?: number;
+  signing_placement_mode?: SigningPlacementMode | null;
+  signing_current_signer_id?: number | null;
+  signing_current_signer_name?: string | null;
+  signing_current_step_order?: number | null;
 };
 
 type TaskComment = {
@@ -99,9 +117,22 @@ function normalizeTaskItem(task: TaskItem): TaskItem {
     ...task,
     id: normalizeId(task.id),
     group_id: normalizeId(task.group_id),
+    kind: task.kind === "signing" ? "signing" : "task",
     creator_id: normalizeId(task.creator_id),
     assignee_id: task.assignee_id == null ? null : normalizeId(task.assignee_id),
     comments_count: task.comments_count ?? 0,
+    document_name: task.document_name ?? null,
+    document_size: task.document_size == null ? null : Number(task.document_size),
+    document_mime_type: task.document_mime_type ?? null,
+    signer_count: task.signer_count == null ? 0 : Number(task.signer_count),
+    signed_count: task.signed_count == null ? 0 : Number(task.signed_count),
+    signing_placement_mode:
+      task.signing_placement_mode === "all_pages" ? "all_pages" : task.signing_placement_mode === "last_page" ? "last_page" : null,
+    signing_current_signer_id:
+      task.signing_current_signer_id == null ? null : normalizeId(task.signing_current_signer_id),
+    signing_current_signer_name: task.signing_current_signer_name ?? null,
+    signing_current_step_order:
+      task.signing_current_step_order == null ? null : Number(task.signing_current_step_order),
   };
 }
 
@@ -133,6 +164,10 @@ const BUCKET_LABELS: Record<TaskBucket, string> = {
   queue: "В очереди",
 };
 
+const TASK_KIND_LABELS: Record<TaskKind, string> = {
+  task: "Задача",
+  signing: "Подписание",
+};
 const TASKS_POLL_INTERVAL_MS = 5000;
 const GROUP_SIGNALS_POLL_INTERVAL_MS = 2000;
 const COMMENTS_POLL_INTERVAL_MS = 4000;
@@ -191,6 +226,23 @@ function sortTaskItems(items: TaskItem[]) {
   });
 }
 
+function sortVisibleTaskItems(items: TaskItem[], bucket: TaskBucket) {
+  if (bucket !== "done") {
+    return sortTaskItems(items);
+  }
+
+  return [...items].sort((a, b) => {
+    const aCompleted = a.status === "done";
+    const bCompleted = b.status === "done";
+    if (aCompleted !== bCompleted) return aCompleted ? -1 : 1;
+
+    const completedDiff = toTimestamp(b.completed_at) - toTimestamp(a.completed_at);
+    if (completedDiff !== 0) return completedDiff;
+
+    return toTimestamp(b.updated_at) - toTimestamp(a.updated_at);
+  });
+}
+
 async function apiJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
     cache: "no-store",
@@ -243,7 +295,7 @@ function CloseIcon() {
 
 export default function TasksWorkspacePage() {
   const router = useRouter();
-  const { showInfo } = useAppToast();
+  const { showInfo, showSuccess } = useAppToast();
 
   const [me, setMe] = useState<CurrentUser | null>(null);
   const [groups, setGroups] = useState<TaskGroup[]>([]);
@@ -264,6 +316,13 @@ export default function TasksWorkspacePage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createPriority, setCreatePriority] = useState<TaskPriority>("medium");
+  const [createKind, setCreateKind] = useState<TaskKind>("task");
+  const [createDocument, setCreateDocument] = useState<File | null>(null);
+  const [createSignerIds, setCreateSignerIds] = useState<number[]>([]);
+  const [createStampTemplate, setCreateStampTemplate] = useState<SigningStampTemplateValue | null>(
+    null
+  );
+  const [stampPlacementOpen, setStampPlacementOpen] = useState(false);
 
   const [transferTask, setTransferTask] = useState<TaskItem | null>(null);
   const [transferAssigneeId, setTransferAssigneeId] = useState<number | null>(null);
@@ -274,6 +333,8 @@ export default function TasksWorkspacePage() {
   const [loadingComments, setLoadingComments] = useState(false);
   const [sendingComment, setSendingComment] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+  const [documentViewerTask, setDocumentViewerTask] = useState<TaskItem | null>(null);
+  const [signingTask, setSigningTask] = useState<TaskItem | null>(null);
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -286,6 +347,7 @@ export default function TasksWorkspacePage() {
   const ownCommentToastSuppressionRef = useRef<Map<number, number>>(new Map());
   const commentsViewportRef = useRef<HTMLDivElement | null>(null);
   const pendingCommentsScrollRef = useRef(false);
+  const placementAutoOpenKeyRef = useRef("");
 
   useToastSync({
     error,
@@ -345,6 +407,14 @@ export default function TasksWorkspacePage() {
     [me, members]
   );
 
+  const createSigningMembers = useMemo(
+    () =>
+      createSignerIds
+        .map((signerId) => members.find((member) => member.id === signerId) || null)
+        .filter((member): member is TaskMember => member !== null),
+    [createSignerIds, members]
+  );
+
   const canManageSelectedTasks = useMemo(() => {
     if (!me || !selectedMemberId) return false;
     return selectedMemberId === me.id;
@@ -357,13 +427,20 @@ export default function TasksWorkspacePage() {
 
   const tasksForSelectedMember = useMemo(() => {
     if (!selectedMemberId) return [];
-    return tasks.filter((task) => task.assignee_id === selectedMemberId);
+    return tasks.filter((task) => {
+      if (task.kind === "signing") {
+        return true;
+      }
+      return task.assignee_id === selectedMemberId;
+    });
   }, [selectedMemberId, tasks]);
 
-  const visibleTasks = useMemo(
-    () => tasksForSelectedMember.filter((task) => taskBucketFromStatus(task.status) === activeBucket),
-    [activeBucket, tasksForSelectedMember]
-  );
+  const visibleTasks = useMemo(() => {
+    const bucketTasks = tasksForSelectedMember.filter(
+      (task) => taskBucketFromStatus(task.status) === activeBucket
+    );
+    return sortVisibleTaskItems(bucketTasks, activeBucket);
+  }, [activeBucket, tasksForSelectedMember]);
 
   const [queueUnreadCountByGroup, setQueueUnreadCountByGroup] = useState<Record<number, number>>({});
 
@@ -753,6 +830,53 @@ export default function TasksWorkspacePage() {
     });
   }, [me, members]);
 
+  useEffect(() => {
+    if (!createOpen || createKind !== "signing") return;
+    if (!createDocument || createSignerIds.length === 0) return;
+    if (createStampTemplate || stampPlacementOpen) return;
+
+    const key = `${createDocument.name}:${createDocument.size}:${createSignerIds.join(",")}`;
+    if (placementAutoOpenKeyRef.current === key) return;
+    placementAutoOpenKeyRef.current = key;
+    setStampPlacementOpen(true);
+  }, [createDocument, createKind, createOpen, createSignerIds, createStampTemplate, stampPlacementOpen]);
+
+  const toggleCreateSigner = useCallback((memberId: number) => {
+    setCreateSignerIds((prev) => {
+      const next = prev.includes(memberId)
+        ? prev.filter((id) => id !== memberId)
+        : [...prev, memberId];
+      return next;
+    });
+    setCreateStampTemplate(null);
+  }, []);
+
+  const moveCreateSigner = useCallback((memberId: number, direction: -1 | 1) => {
+    setCreateSignerIds((prev) => {
+      const index = prev.indexOf(memberId);
+      if (index < 0) return prev;
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(index, 1);
+      next.splice(nextIndex, 0, item);
+      return next;
+    });
+    setCreateStampTemplate(null);
+  }, []);
+
+  const closeCreateModal = useCallback(() => {
+    setCreateOpen(false);
+    setCreateTitle("");
+    setCreatePriority("medium");
+    setCreateKind("task");
+    setCreateDocument(null);
+    setCreateSignerIds([]);
+    setCreateStampTemplate(null);
+    setStampPlacementOpen(false);
+    placementAutoOpenKeyRef.current = "";
+  }, []);
+
   const createTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeGroupId || !me) return;
@@ -760,30 +884,62 @@ export default function TasksWorkspacePage() {
       setError("Введите название задачи");
       return;
     }
+    if (createKind === "signing" && !createDocument) {
+      setError("Выберите документ для подписания");
+      return;
+    }
+    if (createKind === "signing" && createSignerIds.length === 0) {
+      setError("Выберите хотя бы одного подписанта");
+      return;
+    }
+    if (createKind === "signing" && !createStampTemplate) {
+      setError("Сначала разместите блок штампов на PDF");
+      return;
+    }
 
     setCreatingTask(true);
     setError("");
     setMessage("");
     try {
-      const result = await apiJson<{ task: TaskItem }>("/api/tasks", {
+      const formData = new FormData();
+      formData.set("groupId", String(activeGroupId));
+      formData.set("title", createTitle.trim());
+      formData.set("priority", createPriority);
+      formData.set("assigneeId", String(me.id));
+      formData.set("description", "");
+      formData.set("kind", createKind);
+      if (createDocument) {
+        formData.set("document", createDocument);
+      }
+      if (createKind === "signing") {
+        formData.set("signerIds", JSON.stringify(createSignerIds));
+        formData.set("stampTemplate", JSON.stringify(createStampTemplate));
+      }
+
+      const response = await fetch("/api/tasks", {
         method: "POST",
-        body: JSON.stringify({
-          groupId: activeGroupId,
-          title: createTitle.trim(),
-          priority: createPriority,
-          assigneeId: me.id,
-          description: "",
-        }),
+        body: formData,
       });
 
-      setCreateOpen(false);
-      setCreateTitle("");
-      setCreatePriority("medium");
-      setActiveBucket("queue");
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        task?: TaskItem;
+      };
+
+      if (!response.ok || !payload.task) {
+        throw new Error(payload.error || `Request failed (${response.status})`);
+      }
+
+      closeCreateModal();
+      setActiveBucket(createKind === "signing" ? "in_progress" : "queue");
       setSelectedMemberId(me.id);
-      upsertTaskInState(normalizeTaskItem(result.task));
+      upsertTaskInState(normalizeTaskItem(payload.task));
       scheduleQueueSignalsRefresh([activeGroupId]);
-      setMessage("Задача создана и добавлена во вкладку «В очереди»");
+      setMessage(
+        createKind === "signing"
+          ? "Задача на подписание создана и добавлена во вкладку «В работе»"
+          : "Задача создана и добавлена во вкладку «В очереди»"
+      );
     } catch (err: any) {
       setError(err?.message || "Не удалось создать задачу");
     } finally {
@@ -873,6 +1029,39 @@ export default function TasksWorkspacePage() {
       setSendingTransfer(false);
     }
   };
+
+  const handleSigningSaved = useCallback(
+    (payload: {
+      task: unknown;
+      completed: boolean;
+      nextSignerName: string | null;
+      signedStepOrder: number | null;
+    }) => {
+      if (payload.task) {
+        upsertTaskInState(normalizeTaskItem(payload.task as TaskItem));
+      } else if (activeGroupId) {
+        void loadTasks(activeGroupId, { silent: true, detectIncoming: true });
+      }
+
+      setSigningTask(null);
+
+      if (payload.completed) {
+        setActiveBucket("done");
+        showSuccess("Подпись встроена в PDF. Маршрут подписания завершён.");
+        return;
+      }
+
+      if (payload.nextSignerName) {
+        showSuccess(
+          `Подпись встроена в PDF. Следующий подписант: ${payload.nextSignerName}.`
+        );
+        return;
+      }
+
+      showSuccess("Подпись встроена в PDF.");
+    },
+    [activeGroupId, loadTasks, showSuccess, upsertTaskInState]
+  );
 
   const openCommentsModal = async (task: TaskItem) => {
     setLoadingComments(true);
@@ -1107,17 +1296,47 @@ export default function TasksWorkspacePage() {
                             task.status === "blocked" ||
                             task.status === "review";
                           const canReturnToRework = task.status === "done";
- 
+                          const canSignNow =
+                            task.kind === "signing" &&
+                            canManageSelectedTasks &&
+                            !!me &&
+                            task.signing_current_signer_id === me.id &&
+                            task.status !== "done";
+
                           return (
                             <article
                               key={task.id}
                               className="rounded-xl border border-slate-200 bg-white px-3 py-3"
                             >
-                              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                                <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-medium text-slate-900">
-                                    {task.title}
+                              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="truncate text-sm font-medium text-slate-900">
+                                      {task.title}
+                                    </div>
+                                    {task.kind === "signing" && (
+                                      <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                                        {TASK_KIND_LABELS[task.kind]}
+                                      </span>
+                                    )}
                                   </div>
+                                  {task.kind === "signing" && task.document_name && (
+                                    <div className="mt-1 truncate text-xs text-slate-500">
+                                      Документ: {task.document_name}
+                                    </div>
+                                  )}
+                                  {task.kind === "signing" && (
+                                    <div className="mt-1 text-xs text-slate-400">
+                                      {`Маршрут: ${task.signed_count || 0} из ${task.signer_count || 0} подписант(ов) • ${
+                                        task.signing_current_signer_name
+                                          ? `сейчас подписывает ${task.signing_current_signer_name} • `
+                                          : ""
+                                      }штампы ${
+                                        task.signing_placement_mode === "all_pages"
+                                          ? "на всех листах"
+                                          : "на последнем листе"
+                                      }`}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {canManageSelectedTasks ? (
@@ -1151,6 +1370,17 @@ export default function TasksWorkspacePage() {
                                 )}
 
                                 <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                                  {task.kind === "signing" && task.document_name && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setDocumentViewerTask(task)
+                                      }
+                                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-600 transition hover:bg-slate-100"
+                                    >
+                                      Документ
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => void openCommentsModal(task)}
@@ -1164,7 +1394,17 @@ export default function TasksWorkspacePage() {
                                     {commentsCount > 0 ? `Комментарии (${commentsCount})` : "Комментарии"}
                                   </button>
 
-                                  {canManageSelectedTasks && activeBucket !== "done" && (
+                                  {task.kind === "signing" && canSignNow && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSigningTask(task)}
+                                      className="rounded-lg border border-emerald-300/80 bg-[linear-gradient(180deg,rgba(236,253,245,0.98),rgba(209,250,229,0.94))] px-2.5 py-1 text-xs font-semibold text-emerald-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(5,46,22,0.08)] transition hover:border-emerald-400 hover:bg-[linear-gradient(180deg,rgba(220,252,231,1),rgba(187,247,208,0.95))]"
+                                    >
+                                      Подписать
+                                    </button>
+                                  )}
+
+                                  {task.kind !== "signing" && canManageSelectedTasks && activeBucket !== "done" && (
                                     <button
                                       type="button"
                                       onClick={() => openTransferModal(task)}
@@ -1174,7 +1414,7 @@ export default function TasksWorkspacePage() {
                                     </button>
                                   )}
 
-                                  {canManageSelectedTasks && activeBucket === "queue" && (
+                                  {task.kind !== "signing" && canManageSelectedTasks && activeBucket === "queue" && (
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -1187,7 +1427,7 @@ export default function TasksWorkspacePage() {
                                     </button>
                                   )}
 
-                                  {canManageSelectedTasks && activeBucket === "in_progress" && (
+                                  {task.kind !== "signing" && canManageSelectedTasks && activeBucket === "in_progress" && (
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -1200,7 +1440,7 @@ export default function TasksWorkspacePage() {
                                     </button>
                                   )}
 
-                                  {canManageSelectedTasks && activeBucket === "done" && (
+                                  {task.kind !== "signing" && canManageSelectedTasks && activeBucket === "done" && (
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -1270,17 +1510,35 @@ export default function TasksWorkspacePage() {
       </div>
 
       {createOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-4">
           <form
             onSubmit={(event) => void createTask(event)}
-            className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-5 shadow-2xl"
+            className="my-auto flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white p-5 shadow-2xl"
           >
             <h3 className="text-base font-semibold text-slate-900">Создание задачи</h3>
             <p className="mt-1 text-xs text-slate-500">
               Новая задача будет добавлена во вкладку «В очереди».
             </p>
 
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+              <AppSelect
+                value={createKind}
+                onChange={(event) => {
+                  const nextKind = event.target.value as TaskKind;
+                  setCreateKind(nextKind);
+                  if (nextKind !== "signing") {
+                    setCreateDocument(null);
+                    setCreateSignerIds([]);
+                    setCreateStampTemplate(null);
+                    setStampPlacementOpen(false);
+                  }
+                }}
+                wrapperClassName="w-full rounded-2xl border border-slate-200 bg-white text-slate-700 ring-slate-300 transition focus-within:ring-2"
+                selectClassName="px-3 py-2 pr-9 text-sm text-slate-700"
+              >
+                <option value="task">Задача</option>
+                <option value="signing">Подписание</option>
+              </AppSelect>
               <input
                 value={createTitle}
                 onChange={(event) => setCreateTitle(event.target.value)}
@@ -1297,19 +1555,166 @@ export default function TasksWorkspacePage() {
                 <option value="medium">Средний приоритет</option>
                 <option value="low">Низкий приоритет</option>
               </AppSelect>
+
+              {createKind === "signing" && (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          {"Подписанты"}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {"Порядок подписи задаётся порядком выбранных пользователей."}
+                        </div>
+                      </div>
+                      <div className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white">
+                        {createSignerIds.length}
+                      </div>
+                    </div>
+
+                    {createSigningMembers.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {createSigningMembers.map((member, index) => (
+                          <div
+                            key={member.id}
+                            className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-slate-900">{member.name}</div>
+                              <div className="text-xs text-slate-500">@{member.username}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-full bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white">
+                                {index + 1}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => moveCreateSigner(member.id, -1)}
+                                disabled={index === 0}
+                                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => moveCreateSigner(member.id, 1)}
+                                disabled={index === createSigningMembers.length - 1}
+                                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleCreateSigner(member.id)}
+                                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-600 transition hover:bg-slate-100"
+                              >
+                                {"Убрать"}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {members.map((member) => {
+                        const isSelected = createSignerIds.includes(member.id);
+                        return (
+                          <button
+                            key={member.id}
+                            type="button"
+                            onClick={() => toggleCreateSigner(member.id)}
+                            className={cls(
+                              "rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                              isSelected
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                            )}
+                          >
+                            {member.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-3 text-xs font-medium text-slate-600">
+                      {"Документ для подписания"}
+                    </div>
+                    <DocumentDropField
+                      file={createDocument}
+                      onFileChange={(file) => {
+                        setCreateDocument(file);
+                        setCreateStampTemplate(null);
+                        setStampPlacementOpen(false);
+                      }}
+                      disabled={creatingTask}
+                      accept=".pdf,application/pdf"
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          {"Штампы"}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {"После выбора PDF и подписантов откроется превью последнего листа для размещения общего блока штампов."}
+                        </div>
+                      </div>
+                      {createStampTemplate && (
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                          {"Готово"}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+                      <div>
+                        {createStampTemplate ? (
+                          <>
+                            {"Блок штампов размещён: "}
+                            {createStampTemplate.placementMode === "all_pages"
+                              ? "на всех листах"
+                              : "на последнем листе"}
+                          </>
+                        ) : (
+                          "Шаблон ещё не настроен"
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setStampPlacementOpen(true)}
+                        disabled={!createDocument || createSignerIds.length === 0}
+                        className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                      >
+                        {createStampTemplate ? "Изменить" : "Разместить"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-5 flex shrink-0 justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setCreateOpen(false)}
+                onClick={closeCreateModal}
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
               >
                 Отмена
               </button>
               <button
                 type="submit"
-                disabled={creatingTask || !createTitle.trim()}
+                disabled={
+                  creatingTask ||
+                  !createTitle.trim() ||
+                  (createKind === "signing" &&
+                    (!createDocument || createSignerIds.length === 0 || !createStampTemplate))
+                }
                 className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
               >
                 {creatingTask ? "Сохранение..." : "Создать"}
@@ -1317,6 +1722,19 @@ export default function TasksWorkspacePage() {
             </div>
           </form>
         </div>
+      )}
+
+      {stampPlacementOpen && createDocument && createSigningMembers.length > 0 && (
+        <SigningStampPlacementModal
+          file={createDocument}
+          signers={createSigningMembers}
+          initialValue={createStampTemplate}
+          onClose={() => setStampPlacementOpen(false)}
+          onConfirm={(value) => {
+            setCreateStampTemplate(value);
+            setStampPlacementOpen(false);
+          }}
+        />
       )}
 
       {transferTask && (
@@ -1372,6 +1790,25 @@ export default function TasksWorkspacePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {documentViewerTask && documentViewerTask.document_name && (
+        <TaskDocumentViewerModal
+          taskId={documentViewerTask.id}
+          taskTitle={documentViewerTask.title}
+          documentName={documentViewerTask.document_name}
+          documentMimeType={documentViewerTask.document_mime_type}
+          onClose={() => setDocumentViewerTask(null)}
+        />
+      )}
+
+      {signingTask && (
+        <TaskSigningModal
+          open={!!signingTask}
+          task={signingTask}
+          onClose={() => setSigningTask(null)}
+          onSigned={handleSigningSaved}
+        />
       )}
 
       {commentsTask && (

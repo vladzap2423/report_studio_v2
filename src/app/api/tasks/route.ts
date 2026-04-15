@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
 import {
@@ -6,9 +9,11 @@ import {
   getTaskById,
   getTaskWithMetaById,
   isTaskGroupMember,
+  isTaskKind,
   isTaskPriority,
   isTaskStatus,
   userCanAccessTaskGroup,
+  type TaskKind,
   type TaskPriority,
   type TaskWithMetaRow,
 } from "@/lib/tasks";
@@ -18,6 +23,15 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type TaskListItem = TaskWithMetaRow;
+type SigningPlacementMode = "last_page" | "all_pages";
+type SigningStampTemplate = {
+  placementMode: SigningPlacementMode;
+  columnCount: 1 | 2;
+  xRatio: number;
+  yRatio: number;
+  widthRatio: number;
+  heightRatio: number;
+};
 
 function parseNumber(value: unknown) {
   const num = Number(value);
@@ -32,6 +46,109 @@ function parseDueAt(value: unknown): string | null | undefined {
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return undefined;
   return date.toISOString();
+}
+
+function sanitizeFileName(fileName: string) {
+  const safe = path
+    .basename(fileName || "document")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "_")
+    .trim();
+
+  return safe || "document";
+}
+
+function parseJsonField(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function isSigningPlacementMode(value: unknown): value is SigningPlacementMode {
+  return value === "last_page" || value === "all_pages";
+}
+
+function isFiniteRatio(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function isSigningColumnCount(value: unknown): value is 1 | 2 {
+  return value === 1 || value === 2;
+}
+
+function isValidSigningStampTemplate(value: unknown): value is SigningStampTemplate {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isSigningPlacementMode(candidate.placementMode) &&
+    isSigningColumnCount(candidate.columnCount) &&
+    isFiniteRatio(candidate.xRatio) &&
+    isFiniteRatio(candidate.yRatio) &&
+    isFiniteRatio(candidate.widthRatio) &&
+    isFiniteRatio(candidate.heightRatio) &&
+    (candidate.widthRatio as number) > 0 &&
+    (candidate.heightRatio as number) > 0 &&
+    (candidate.xRatio as number) + (candidate.widthRatio as number) <= 1 &&
+    (candidate.yRatio as number) + (candidate.heightRatio as number) <= 1
+  );
+}
+
+function normalizeSignerIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item) && item > 0)
+    )
+  );
+}
+
+function isPdfDocument(file: File) {
+  const name = file.name.toLowerCase();
+  const mime = (file.type || "").toLowerCase();
+  return name.endsWith(".pdf") || mime === "application/pdf";
+}
+
+async function parseCreateTaskPayload(request: NextRequest) {
+  const contentType = request.headers.get("content-type") || "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await request.formData();
+    const documentEntry = formData.get("document");
+
+    return {
+      groupId: parseNumber(formData.get("groupId")),
+      title: String(formData.get("title") || "").trim(),
+      description: String(formData.get("description") || "").trim(),
+      assigneeIdRaw: parseNumber(formData.get("assigneeId")),
+      priorityRaw: formData.get("priority"),
+      dueAtRaw: formData.get("dueAt"),
+      kindRaw: formData.get("kind"),
+      signerIdsRaw: parseJsonField(formData.get("signerIds")),
+      stampTemplateRaw: parseJsonField(formData.get("stampTemplate")),
+      documentFile:
+        documentEntry instanceof File && documentEntry.size > 0 ? documentEntry : null,
+    };
+  }
+
+  const body = await request.json();
+  return {
+    groupId: parseNumber(body?.groupId),
+    title: String(body?.title || "").trim(),
+    description: String(body?.description || "").trim(),
+    assigneeIdRaw: parseNumber(body?.assigneeId),
+    priorityRaw: body?.priority,
+    dueAtRaw: body?.dueAt,
+    kindRaw: body?.kind,
+    signerIdsRaw: body?.signerIds,
+    stampTemplateRaw: body?.stampTemplate,
+    documentFile: null,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -93,6 +210,7 @@ export async function GET(request: NextRequest) {
         SELECT
           t.id,
           t.group_id,
+          t.kind,
           t.title,
           t.description,
           t.status,
@@ -106,10 +224,41 @@ export async function GET(request: NextRequest) {
           t.completed_at,
           cu.name AS creator_name,
           au.name AS assignee_name,
-          t.comments_count
+          t.comments_count,
+          td.original_name AS document_name,
+          td.file_size AS document_size,
+          td.mime_type AS document_mime_type,
+          COALESCE(steps.signer_count, 0) AS signer_count,
+          COALESCE(steps.signed_count, 0) AS signed_count,
+          tst.placement_mode AS signing_placement_mode,
+          current_step.signing_current_signer_id,
+          current_step.signing_current_signer_name,
+          current_step.signing_current_step_order
         FROM tasks t
         INNER JOIN users cu ON cu.id = t.creator_id
         LEFT JOIN users au ON au.id = t.assignee_id
+        LEFT JOIN task_documents td ON td.task_id = t.id
+        LEFT JOIN task_signing_routes tsr ON tsr.task_id = t.id
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS signer_count,
+            COUNT(*) FILTER (WHERE tss.state = 'signed')::int AS signed_count
+          FROM task_signing_steps tss
+          WHERE tss.route_id = tsr.id
+        ) steps ON TRUE
+        LEFT JOIN task_signing_templates tst ON tst.task_id = t.id
+        LEFT JOIN LATERAL (
+          SELECT
+            tss.signer_user_id AS signing_current_signer_id,
+            u.name AS signing_current_signer_name,
+            tss.step_order AS signing_current_step_order
+          FROM task_signing_steps tss
+          LEFT JOIN users u ON u.id = tss.signer_user_id
+          WHERE tss.route_id = tsr.id
+            AND tss.state = 'active'
+          ORDER BY tss.step_order ASC
+          LIMIT 1
+        ) current_step ON TRUE
         WHERE ${where.join(" AND ")}
         ORDER BY
           CASE t.priority
@@ -136,13 +285,18 @@ export async function POST(request: NextRequest) {
   if (auth.response) return auth.response;
 
   try {
-    const body = await request.json();
-    const groupId = parseNumber(body?.groupId);
-    const title = String(body?.title || "").trim();
-    const description = String(body?.description || "").trim();
-    const assigneeIdRaw = parseNumber(body?.assigneeId);
-    const priorityRaw = body?.priority;
-    const dueAt = parseDueAt(body?.dueAt);
+    const payload = await parseCreateTaskPayload(request);
+    const groupId = payload.groupId;
+    const title = payload.title;
+    const description = payload.description;
+    const assigneeIdRaw = payload.assigneeIdRaw;
+    const priorityRaw = payload.priorityRaw;
+    const dueAt = parseDueAt(payload.dueAtRaw);
+    const kind: TaskKind = isTaskKind(payload.kindRaw) ? payload.kindRaw : "task";
+    const signerIds = kind === "signing" ? normalizeSignerIds(payload.signerIdsRaw) : [];
+    const stampTemplate = isValidSigningStampTemplate(payload.stampTemplateRaw)
+      ? payload.stampTemplateRaw
+      : null;
 
     if (!groupId) {
       return NextResponse.json({ error: "groupId is required" }, { status: 400 });
@@ -162,29 +316,80 @@ export async function POST(request: NextRequest) {
       assigneeId = meInGroup ? auth.user.id : null;
     }
 
+    if (kind === "signing" && signerIds.length > 0) {
+      assigneeId = signerIds[0];
+    }
+
     if (assigneeId) {
       const member = await isTaskGroupMember(groupId, assigneeId);
       if (!member) {
         return NextResponse.json(
-          { error: "Assignee must be a member of this group" },
+          { error: "Исполнитель должен состоять в выбранной группе" },
           { status: 400 }
         );
       }
     }
 
     const priority: TaskPriority = isTaskPriority(priorityRaw) ? priorityRaw : "medium";
+    const initialStatus = kind === "signing" ? "in_progress" : "new";
 
-    if (body?.dueAt !== undefined && dueAt === undefined) {
+    if (payload.dueAtRaw !== undefined && payload.dueAtRaw !== null && dueAt === undefined) {
       return NextResponse.json({ error: "Invalid dueAt value" }, { status: 400 });
+    }
+
+    if (kind === "signing" && !payload.documentFile) {
+      return NextResponse.json(
+        { error: "document is required for signing task" },
+        { status: 400 }
+      );
+    }
+
+    if (kind === "signing" && payload.documentFile && !isPdfDocument(payload.documentFile)) {
+      return NextResponse.json({ error: "Для подписания доступен только PDF" }, { status: 400 });
+    }
+
+    if (kind === "signing" && signerIds.length === 0) {
+      return NextResponse.json({ error: "Выберите хотя бы одного подписанта" }, { status: 400 });
+    }
+
+    if (kind === "signing" && !stampTemplate) {
+      return NextResponse.json(
+        { error: "Сначала разместите блок штампов на документе" },
+        { status: 400 }
+      );
+    }
+
+    if (kind === "signing") {
+      for (const signerId of signerIds) {
+        const member = await isTaskGroupMember(groupId, signerId);
+        if (!member) {
+          return NextResponse.json(
+            { error: "Все подписанты должны состоять в выбранной группе" },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     const insertRes = await dbQuery<TaskListItem>(
       `
-        INSERT INTO tasks(group_id, title, description, status, priority, creator_id, assignee_id, due_at)
-        VALUES ($1, $2, $3, 'new', $4::task_priority, $5, $6, $7)
+        INSERT INTO tasks(
+          group_id,
+          kind,
+          title,
+          description,
+          status,
+          priority,
+          creator_id,
+          assignee_id,
+          due_at,
+          started_at
+        )
+        VALUES ($1, $2::task_kind, $3, $4, $5::task_status, $6::task_priority, $7, $8, $9, $10)
         RETURNING
           id,
           group_id,
+          kind,
           title,
           description,
           status,
@@ -197,12 +402,133 @@ export async function POST(request: NextRequest) {
           started_at,
           completed_at,
           ''::text AS creator_name,
-          NULL::text AS assignee_name
+          NULL::text AS assignee_name,
+          0::int AS comments_count,
+          NULL::text AS document_name,
+          NULL::bigint AS document_size,
+          NULL::text AS document_mime_type,
+          0::int AS signer_count,
+          0::int AS signed_count,
+          NULL::text AS signing_placement_mode,
+          NULL::bigint AS signing_current_signer_id,
+          NULL::text AS signing_current_signer_name,
+          NULL::int AS signing_current_step_order
       `,
-      [groupId, title, description, priority, auth.user.id, assigneeId, dueAt ?? null]
+      [
+        groupId,
+        kind,
+        title,
+        description,
+        initialStatus,
+        priority,
+        auth.user.id,
+        assigneeId,
+        dueAt ?? null,
+        initialStatus === "in_progress" ? new Date().toISOString() : null,
+      ]
     );
 
     const task = insertRes.rows[0];
+
+    if (payload.documentFile) {
+      const safeOriginalName = sanitizeFileName(payload.documentFile.name);
+      const documentDir = path.join(
+        process.cwd(),
+        "storage",
+        "task-documents",
+        String(task.id)
+      );
+      const storedName = `${randomUUID()}${path.extname(safeOriginalName)}`;
+      const documentPath = path.join(documentDir, storedName);
+      const fileBuffer = Buffer.from(await payload.documentFile.arrayBuffer());
+
+      try {
+        await fs.mkdir(documentDir, { recursive: true });
+        await fs.writeFile(documentPath, fileBuffer);
+
+        await dbQuery(
+          `
+            INSERT INTO task_documents(task_id, original_name, stored_name, file_path, mime_type, file_size)
+            VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [
+            task.id,
+            safeOriginalName,
+            storedName,
+            documentPath,
+            payload.documentFile.type || null,
+            payload.documentFile.size,
+          ]
+        );
+      } catch (error) {
+        await dbQuery(`DELETE FROM tasks WHERE id = $1`, [task.id]).catch(() => null);
+        await fs.rm(documentDir, { recursive: true, force: true }).catch(() => null);
+        throw error;
+      }
+    }
+
+    if (kind === "signing") {
+      try {
+        const routeRes = await dbQuery<{ id: number }>(
+          `
+            INSERT INTO task_signing_routes(task_id, mode, state, current_step_order, created_by)
+            VALUES ($1, 'ordered_users', 'in_progress', 1, $2)
+            RETURNING id
+          `,
+          [task.id, auth.user.id]
+        );
+
+        for (let index = 0; index < signerIds.length; index += 1) {
+          await dbQuery(
+            `
+              INSERT INTO task_signing_steps(
+                route_id,
+                step_order,
+                step_kind,
+                state,
+                signer_user_id
+              )
+              VALUES ($1, $2, 'user', $3, $4)
+            `,
+            [routeRes.rows[0].id, index + 1, index === 0 ? "active" : "pending", signerIds[index]]
+          );
+        }
+
+        await dbQuery(
+          `
+            INSERT INTO task_signing_templates(
+              task_id,
+              placement_mode,
+              column_count,
+              x_ratio,
+              y_ratio,
+              width_ratio,
+              height_ratio
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `,
+          [
+            task.id,
+            stampTemplate?.placementMode ?? "last_page",
+            stampTemplate?.columnCount ?? 1,
+            stampTemplate?.xRatio ?? 0,
+            stampTemplate?.yRatio ?? 0,
+            stampTemplate?.widthRatio ?? 0,
+            stampTemplate?.heightRatio ?? 0,
+          ]
+        );
+      } catch (error) {
+        await dbQuery(`DELETE FROM tasks WHERE id = $1`, [task.id]).catch(() => null);
+        await fs
+          .rm(path.join(process.cwd(), "storage", "task-documents", String(task.id)), {
+            recursive: true,
+            force: true,
+          })
+          .catch(() => null);
+        throw error;
+      }
+    }
+
     await appendTaskHistory(
       task.id,
       auth.user.id,
@@ -210,10 +536,14 @@ export async function POST(request: NextRequest) {
       null,
       {
         title: task.title,
+        kind: task.kind,
         status: task.status,
         priority: task.priority,
         assignee_id: task.assignee_id,
         group_id: task.group_id,
+        signer_ids: signerIds,
+        signing_placement_mode: stampTemplate?.placementMode ?? null,
+        signing_column_count: stampTemplate?.columnCount ?? null,
       }
     );
 
@@ -303,7 +633,7 @@ export async function PUT(request: NextRequest) {
         const member = await isTaskGroupMember(existing.group_id, assigneeId);
         if (!member) {
           return NextResponse.json(
-            { error: "Assignee must be a member of this group" },
+            { error: "Исполнитель должен состоять в выбранной группе" },
             { status: 400 }
           );
         }

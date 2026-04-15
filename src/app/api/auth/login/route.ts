@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { dbQuery, ensureDatabaseReady } from "@/lib/db";
 import { verifyPassword } from "@/lib/password";
 import {
+  buildSessionCookieOptions,
   createSessionToken,
-  getSessionMaxAgeSeconds,
   SESSION_COOKIE_NAME,
 } from "@/lib/session";
 import type { UserRole } from "@/lib/roles";
@@ -81,11 +81,7 @@ export async function POST(request: NextRequest) {
   response.cookies.set({
     name: SESSION_COOKIE_NAME,
     value: token,
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: getSessionMaxAgeSeconds(),
+    ...buildSessionCookieOptions(request),
   });
 
   return response;

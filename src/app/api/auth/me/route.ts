@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE_NAME } from "@/lib/session";
+import { buildExpiredSessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/session";
 import { getCurrentUserFromSessionToken } from "@/lib/current-user";
 
 export async function GET(request: NextRequest) {
@@ -15,8 +15,7 @@ export async function GET(request: NextRequest) {
       response.cookies.set({
         name: SESSION_COOKIE_NAME,
         value: "",
-        path: "/",
-        expires: new Date(0),
+        ...buildExpiredSessionCookieOptions(request),
       });
       return response;
     }

@@ -16,13 +16,14 @@ function buildConnectionString() {
   const user = process.env.PG_USER;
   const password = process.env.PG_PASSWORD;
   const dbName = process.env.PG_DB;
+  const host = process.env.PG_HOST || "localhost";
   const port = process.env.PG_PORT || "5432";
 
   if (!user || !password || !dbName) {
     throw new Error("DATABASE_URL or PG_USER/PG_PASSWORD/PG_DB env vars are required");
   }
 
-  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@localhost:${port}/${encodeURIComponent(dbName)}`;
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(dbName)}`;
 }
 
 const connectionString = buildConnectionString();
@@ -71,6 +72,15 @@ async function createSchema() {
     BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_priority') THEN
         CREATE TYPE task_priority AS ENUM ('low', 'medium', 'high');
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_kind') THEN
+        CREATE TYPE task_kind AS ENUM ('task', 'signing');
       END IF;
     END $$;
   `);
@@ -137,6 +147,7 @@ async function createSchema() {
     CREATE TABLE IF NOT EXISTS tasks (
       id BIGSERIAL PRIMARY KEY,
       group_id BIGINT NOT NULL REFERENCES task_groups(id) ON DELETE CASCADE,
+      kind task_kind NOT NULL DEFAULT 'task',
       title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       status task_status NOT NULL DEFAULT 'new',
@@ -149,6 +160,112 @@ async function createSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       started_at TIMESTAMPTZ,
       completed_at TIMESTAMPTZ
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_documents (
+      id BIGSERIAL PRIMARY KEY,
+      task_id BIGINT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+      original_name TEXT NOT NULL,
+      stored_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      mime_type TEXT,
+      file_size BIGINT NOT NULL,
+      signed_file_path TEXT,
+      signed_file_size BIGINT,
+      signed_revision INTEGER NOT NULL DEFAULT 0,
+      signed_updated_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_signing_routes (
+      id BIGSERIAL PRIMARY KEY,
+      task_id BIGINT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      current_step_order INTEGER NOT NULL DEFAULT 1,
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_signing_steps (
+      id BIGSERIAL PRIMARY KEY,
+      route_id BIGINT NOT NULL REFERENCES task_signing_routes(id) ON DELETE CASCADE,
+      step_order INTEGER NOT NULL,
+      step_kind TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      signer_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      signer_group_id BIGINT REFERENCES task_groups(id) ON DELETE SET NULL,
+      completed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(route_id, step_order)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_signing_templates (
+      id BIGSERIAL PRIMARY KEY,
+      task_id BIGINT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+      placement_mode TEXT NOT NULL DEFAULT 'last_page',
+      column_count INTEGER NOT NULL DEFAULT 1,
+      x_ratio DOUBLE PRECISION NOT NULL,
+      y_ratio DOUBLE PRECISION NOT NULL,
+      width_ratio DOUBLE PRECISION NOT NULL,
+      height_ratio DOUBLE PRECISION NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_signatures (
+      id BIGSERIAL PRIMARY KEY,
+      task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      route_id BIGINT NOT NULL REFERENCES task_signing_routes(id) ON DELETE CASCADE,
+      step_id BIGINT NOT NULL UNIQUE REFERENCES task_signing_steps(id) ON DELETE CASCADE,
+      signer_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+      signature_type TEXT NOT NULL DEFAULT 'cades_bes_detached',
+      signature_format TEXT NOT NULL DEFAULT 'p7s',
+      signature_path TEXT NOT NULL,
+      signature_size BIGINT NOT NULL,
+      document_sha256 TEXT NOT NULL,
+      certificate_thumbprint TEXT NOT NULL,
+      certificate_subject TEXT NOT NULL,
+      certificate_issuer TEXT,
+      certificate_serial TEXT,
+      certificate_valid_from TIMESTAMPTZ,
+      certificate_valid_to TIMESTAMPTZ,
+      signed_pdf_path TEXT,
+      signed_pdf_size BIGINT,
+      signed_revision INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_signing_sessions (
+      id UUID PRIMARY KEY,
+      task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      route_id BIGINT NOT NULL REFERENCES task_signing_routes(id) ON DELETE CASCADE,
+      step_id BIGINT NOT NULL REFERENCES task_signing_steps(id) ON DELETE CASCADE,
+      signer_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      prepared_pdf_path TEXT NOT NULL,
+      document_digest TEXT NOT NULL,
+      reserved_region_start INTEGER NOT NULL,
+      reserved_region_end INTEGER NOT NULL,
+      source_sha256 TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ
     );
   `);
 
@@ -220,8 +337,58 @@ async function createSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS kind task_kind NOT NULL DEFAULT 'task';
+  `);
+
+  await pool.query(`
     ALTER TABLE task_comments
     ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'comment';
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_documents
+    ADD COLUMN IF NOT EXISTS signed_file_path TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_documents
+    ADD COLUMN IF NOT EXISTS signed_file_size BIGINT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_documents
+    ADD COLUMN IF NOT EXISTS signed_revision INTEGER NOT NULL DEFAULT 0;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_signing_templates
+    ADD COLUMN IF NOT EXISTS column_count INTEGER NOT NULL DEFAULT 1;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_documents
+    ADD COLUMN IF NOT EXISTS signed_updated_at TIMESTAMPTZ;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_signatures
+    ADD COLUMN IF NOT EXISTS signed_pdf_path TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_signatures
+    ADD COLUMN IF NOT EXISTS signed_pdf_size BIGINT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_signatures
+    ADD COLUMN IF NOT EXISTS signed_revision INTEGER NOT NULL DEFAULT 0;
+  `);
+
+  await pool.query(`
+    ALTER TABLE task_signing_sessions
+    ADD COLUMN IF NOT EXISTS document_digest TEXT NOT NULL DEFAULT '';
   `);
 
   await pool.query(`
@@ -259,8 +426,19 @@ async function createSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_group_assignee_status ON tasks(group_id, assignee_id, status);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_group_updated_at ON tasks(group_id, updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_group_kind_status ON tasks(group_id, kind, status);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_comments_task_created ON task_comments(task_id, created_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_history_task_created ON task_history(task_id, created_at);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_documents_task ON task_documents(task_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signing_routes_task ON task_signing_routes(task_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signing_steps_route_order ON task_signing_steps(route_id, step_order);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signing_steps_group_state ON task_signing_steps(signer_group_id, state);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signing_templates_task ON task_signing_templates(task_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signatures_task_created ON task_signatures(task_id, created_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signatures_signer_created ON task_signatures(signer_user_id, created_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signing_sessions_task_created ON task_signing_sessions(task_id, created_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signing_sessions_step_used ON task_signing_sessions(step_id, used_at);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_signing_sessions_expires_at ON task_signing_sessions(expires_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_notifications_user_seen_group ON task_notifications(user_id, is_seen, group_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_task_notifications_task_kind ON task_notifications(task_id, kind);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_report_runs_created_by_created_at ON report_runs(created_by, created_at DESC);`);

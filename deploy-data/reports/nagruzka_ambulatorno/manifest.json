@@ -1,0 +1,10 @@
+{
+  "id": "nagruzka_ambulatorno",
+  "title": "Нагрузка амбулаторно",
+  "version": "1.0.0",
+  "description": "Посещения амбулаторно",
+  "outputs": {
+    "mode": "single",
+    "format": "xlsx"
+  }
+}

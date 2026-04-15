@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasRequiredRole, type UserRole } from "@/lib/roles";
-import { SESSION_COOKIE_NAME, type SessionUser } from "@/lib/session";
+import {
+  buildExpiredSessionCookieOptions,
+  SESSION_COOKIE_NAME,
+  type SessionUser,
+} from "@/lib/session";
 import { getCurrentUserFromSessionToken } from "@/lib/current-user";
 
 type RequireApiRoleResult =
   | { user: SessionUser; response?: never }
   | { user?: never; response: NextResponse };
 
-function clearSessionCookie(response: NextResponse) {
+function clearSessionCookie(
+  request: NextRequest,
+  response: NextResponse
+) {
   response.cookies.set({
     name: SESSION_COOKIE_NAME,
     value: "",
-    path: "/",
-    expires: new Date(0),
+    ...buildExpiredSessionCookieOptions(request),
   });
 }
 
@@ -39,7 +45,7 @@ export async function requireApiRole(
 
   if (!user) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    clearSessionCookie(response);
+    clearSessionCookie(request, response);
     return { response };
   }
 

@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
+import type { NextRequest } from "next/server";
 import type { UserRole } from "@/lib/roles";
 
 export const SESSION_COOKIE_NAME =
@@ -19,6 +20,40 @@ function getSessionTtlDays() {
 
 export function getSessionMaxAgeSeconds() {
   return getSessionTtlDays() * 24 * 60 * 60;
+}
+
+function isHttpsLikeRequest(request: Pick<NextRequest, "nextUrl" | "headers">) {
+  if (request.nextUrl.protocol === "https:") return true;
+
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  if (!forwardedProto) return false;
+
+  return forwardedProto
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .includes("https");
+}
+
+export function buildSessionCookieOptions(
+  request: Pick<NextRequest, "nextUrl" | "headers">
+) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: isHttpsLikeRequest(request),
+    path: "/",
+    maxAge: getSessionMaxAgeSeconds(),
+  };
+}
+
+export function buildExpiredSessionCookieOptions(
+  request: Pick<NextRequest, "nextUrl" | "headers">
+) {
+  return {
+    ...buildSessionCookieOptions(request),
+    expires: new Date(0),
+    maxAge: 0,
+  };
 }
 
 function getSecretKey() {

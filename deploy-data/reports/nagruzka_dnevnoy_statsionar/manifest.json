@@ -1,0 +1,10 @@
+{
+  "id": "nagruzka_dnevnoy_statsionar",
+  "title": "Нагрузка дневной стационар",
+  "version": "1.0.0",
+  "description": "Дневной стационар",
+  "outputs": {
+    "mode": "single",
+    "format": "xlsx"
+  }
+}

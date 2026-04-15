@@ -1,0 +1,10 @@
+{
+  "id": "nagruzka_dispanserizatsiya",
+  "title": "Нагрузка диспансеризация",
+  "version": "1.0.0",
+  "description": "Диспансеризация",
+  "outputs": {
+    "mode": "single",
+    "format": "xlsx"
+  }
+}

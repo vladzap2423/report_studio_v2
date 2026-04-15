@@ -11,9 +11,12 @@ export const TASK_STATUS_VALUES = [
 ] as const;
 
 export const TASK_PRIORITY_VALUES = ["low", "medium", "high"] as const;
+export const TASK_KIND_VALUES = ["task", "signing"] as const;
 
 export type TaskStatus = (typeof TASK_STATUS_VALUES)[number];
 export type TaskPriority = (typeof TASK_PRIORITY_VALUES)[number];
+export type TaskKind = (typeof TASK_KIND_VALUES)[number];
+export type SigningPlacementMode = "last_page" | "all_pages";
 
 const TASK_STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   new: ["in_progress", "canceled"],
@@ -30,6 +33,10 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
 
 export function isTaskPriority(value: unknown): value is TaskPriority {
   return typeof value === "string" && TASK_PRIORITY_VALUES.includes(value as TaskPriority);
+}
+
+export function isTaskKind(value: unknown): value is TaskKind {
+  return typeof value === "string" && TASK_KIND_VALUES.includes(value as TaskKind);
 }
 
 export function canTransitionTaskStatus(from: TaskStatus, to: TaskStatus) {
@@ -56,6 +63,7 @@ export type TaskMemberRow = {
 export type TaskRow = {
   id: number;
   group_id: number;
+  kind: TaskKind;
   title: string;
   description: string;
   status: TaskStatus;
@@ -73,6 +81,15 @@ export type TaskWithMetaRow = TaskRow & {
   creator_name: string;
   assignee_name: string | null;
   comments_count: number;
+  document_name: string | null;
+  document_size: number | null;
+  document_mime_type: string | null;
+  signer_count: number;
+  signed_count: number;
+  signing_placement_mode: SigningPlacementMode | null;
+  signing_current_signer_id: number | null;
+  signing_current_signer_name: string | null;
+  signing_current_step_order: number | null;
 };
 
 export async function getAccessibleTaskGroups(user: SessionUser): Promise<TaskGroupRow[]> {
@@ -163,6 +180,7 @@ export async function getTaskById(taskId: number): Promise<TaskRow | null> {
       SELECT
         id,
         group_id,
+        kind,
         title,
         description,
         status,
@@ -189,6 +207,7 @@ export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaR
       SELECT
         t.id,
         t.group_id,
+        t.kind,
         t.title,
         t.description,
         t.status,
@@ -202,10 +221,41 @@ export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaR
         t.completed_at,
         cu.name AS creator_name,
         au.name AS assignee_name,
-        t.comments_count
+        t.comments_count,
+        td.original_name AS document_name,
+        td.file_size AS document_size,
+        td.mime_type AS document_mime_type,
+        COALESCE(steps.signer_count, 0) AS signer_count,
+        COALESCE(steps.signed_count, 0) AS signed_count,
+        tst.placement_mode AS signing_placement_mode,
+        current_step.signing_current_signer_id,
+        current_step.signing_current_signer_name,
+        current_step.signing_current_step_order
       FROM tasks t
       INNER JOIN users cu ON cu.id = t.creator_id
       LEFT JOIN users au ON au.id = t.assignee_id
+      LEFT JOIN task_documents td ON td.task_id = t.id
+      LEFT JOIN task_signing_routes tsr ON tsr.task_id = t.id
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::int AS signer_count,
+          COUNT(*) FILTER (WHERE tss.state = 'signed')::int AS signed_count
+        FROM task_signing_steps tss
+        WHERE tss.route_id = tsr.id
+      ) steps ON TRUE
+      LEFT JOIN task_signing_templates tst ON tst.task_id = t.id
+      LEFT JOIN LATERAL (
+        SELECT
+          tss.signer_user_id AS signing_current_signer_id,
+          u.name AS signing_current_signer_name,
+          tss.step_order AS signing_current_step_order
+        FROM task_signing_steps tss
+        LEFT JOIN users u ON u.id = tss.signer_user_id
+        WHERE tss.route_id = tsr.id
+          AND tss.state = 'active'
+        ORDER BY tss.step_order ASC
+        LIMIT 1
+      ) current_step ON TRUE
       WHERE t.id = $1
       LIMIT 1
     `,

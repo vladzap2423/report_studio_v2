@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: report_studio_app
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - ../deploy-data/storage:/data/storage
+      - ../deploy-data/reports:/data/reports
+      - ../deploy-data/report-runs:/data/report-runs
