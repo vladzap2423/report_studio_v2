@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 import path from "path";
 import { promises as fs } from "fs";
@@ -53,7 +53,7 @@ async function ensureCatalogBackupDir() {
 
 function getCatalogBackupFilePath(fileName: string) {
   if (!SAFE_CATALOG_FILE_RE.test(fileName)) {
-    throw new Error("Некорректное имя backup-файла справочников.");
+    throw new Error("РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ backup-С„Р°Р№Р»Р° СЃРїСЂР°РІРѕС‡РЅРёРєРѕРІ.");
   }
   return path.join(CATALOG_BACKUP_DIR, fileName);
 }
@@ -136,16 +136,22 @@ export async function createCatalogBackup() {
 
 function validateCatalogPayload(payload: unknown): asserts payload is CatalogBackupPayload {
   if (!payload || typeof payload !== "object") {
-    throw new Error("Некорректный формат backup-файла.");
+    throw new Error("РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ backup-С„Р°Р№Р»Р°.");
   }
 
   const record = payload as Record<string, unknown>;
   if (record.kind !== "services_profiles") {
-    throw new Error("Backup-файл не относится к справочникам services/profiles.");
+    throw new Error("Backup-С„Р°Р№Р» РЅРµ РѕС‚РЅРѕСЃРёС‚СЃСЏ Рє СЃРїСЂР°РІРѕС‡РЅРёРєР°Рј services/profiles.");
   }
   if (!Array.isArray(record.profiles) || !Array.isArray(record.services)) {
-    throw new Error("Backup-файл поврежден: отсутствуют profiles или services.");
+    throw new Error("Backup-С„Р°Р№Р» РїРѕРІСЂРµР¶РґРµРЅ: РѕС‚СЃСѓС‚СЃС‚РІСѓСЋС‚ profiles РёР»Рё services.");
   }
+}
+
+export async function deleteCatalogBackup(fileName: string) {
+  const filePath = getCatalogBackupFilePath(fileName);
+  await fs.access(filePath);
+  await fs.rm(filePath, { force: false });
 }
 
 export async function restoreCatalogBackup(fileName: string) {
@@ -162,7 +168,7 @@ export async function restoreCatalogBackup(fileName: string) {
 
   for (const service of parsed.services) {
     if (service.profile && !profileNames.has(service.profile)) {
-      throw new Error(`В backup найден профиль "${service.profile}", которого нет в списке profiles.`);
+      throw new Error(`Р’ backup РЅР°Р№РґРµРЅ РїСЂРѕС„РёР»СЊ "${service.profile}", РєРѕС‚РѕСЂРѕРіРѕ РЅРµС‚ РІ СЃРїРёСЃРєРµ profiles.`);
     }
   }
 
@@ -226,3 +232,4 @@ export async function readCatalogBackupFile(fileName: string) {
     fileName,
   };
 }
+

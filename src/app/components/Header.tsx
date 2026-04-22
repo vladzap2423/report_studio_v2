@@ -22,7 +22,7 @@ type CurrentUser = {
   role: UserRole;
 };
 
-const Header: React.FC<HeaderProps> = ({ title = "ReportStudio", links = [] }) => {
+const Header: React.FC<HeaderProps> = ({ title = "ГП1 Платформа", links = [] }) => {
   const pathname = usePathname();
   const [user, setUser] = useState<CurrentUser | null>(null);
 
@@ -75,7 +75,13 @@ const Header: React.FC<HeaderProps> = ({ title = "ReportStudio", links = [] }) =
     <header className="app-header app-frame w-full">
       <div className="flex w-full items-center justify-between rounded-3xl border border-gray-300 bg-white/50 px-4 py-3 shadow-sm">
         <div className="flex items-center space-x-6">
-          <div className="text-xl font-semibold text-black">{title}</div>
+          <Link
+            href="/"
+            className="rounded-2xl text-xl font-semibold text-black outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-slate-400"
+            aria-label="На главную"
+          >
+            {title}
+          </Link>
 
           <nav className="flex space-x-2">
             {visibleLinks.map((link) => {

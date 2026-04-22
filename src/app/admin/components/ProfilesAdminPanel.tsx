@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useToastSync } from "@/app/components/AppToastProvider";
+import EditModeButton from "@/app/components/EditModeButton";
 
 type Profile = {
   id: number;
@@ -13,6 +14,7 @@ export default function ProfilesAdminPanel() {
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [newProfile, setNewProfile] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,7 @@ export default function ProfilesAdminPanel() {
       if (!res.ok) throw new Error(body?.error || "Не удалось создать профиль");
 
       setNewProfile("");
+      setIsCreateModalOpen(false);
       setMessage("Профиль добавлен");
       await loadProfiles();
     } catch (e: any) {
@@ -130,29 +133,20 @@ export default function ProfilesAdminPanel() {
       <h2 className="mb-4 text-xl font-semibold text-slate-900">Профили</h2>
 
       <div className="mb-4 flex items-center gap-2">
+        <EditModeButton active={isEditing} onClick={() => setIsEditing((prev) => !prev)} />
         <button
           type="button"
-          onClick={() => setIsEditing((prev) => !prev)}
-          className={`rounded-xl px-4 py-2 text-sm text-white ${
-            isEditing ? "bg-amber-600 hover:bg-amber-500" : "bg-slate-900 hover:bg-slate-800"
-          }`}
-        >
-          {isEditing ? "Редактирование включено" : "Редактировать"}
-        </button>
-        <input
-          value={newProfile}
-          onChange={(e) => setNewProfile(e.target.value)}
-          placeholder="Новый профиль"
           disabled={!isEditing}
-          className="w-full rounded-xl border border-slate-300 bg-white/70 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <button
-          type="button"
-          disabled={saving || !isEditing}
-          onClick={createProfile}
-          className="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-50"
+          onClick={() => {
+            setError(null);
+            setMessage(null);
+            setNewProfile("");
+            setIsCreateModalOpen(true);
+          }}
+          className="ml-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-xl leading-none text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="Добавить профиль"
         >
-          Добавить
+          +
         </button>
       </div>
 
@@ -194,6 +188,73 @@ export default function ProfilesAdminPanel() {
           </div>
         ))}
       </div>
+
+      {isCreateModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (saving) return;
+            setIsCreateModalOpen(false);
+            setNewProfile("");
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_80px_rgba(15,23,42,0.22)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+                Новый профиль
+              </p>
+              <h3 className="mt-2 text-2xl font-semibold text-slate-900">Добавить профиль</h3>
+            </div>
+
+            <label className="block text-sm font-medium text-slate-700">
+              Название профиля
+              <input
+                value={newProfile}
+                onChange={(e) => setNewProfile(e.target.value)}
+                placeholder="Введите название профиля"
+                disabled={saving}
+                autoFocus
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void createProfile();
+                  }
+                  if (event.key === "Escape" && !saving) {
+                    setIsCreateModalOpen(false);
+                    setNewProfile("");
+                  }
+                }}
+                className="mt-2 w-full rounded-2xl border border-slate-300 bg-white/80 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-4 focus:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setIsCreateModalOpen(false);
+                  setNewProfile("");
+                }}
+                className="rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                disabled={saving || !newProfile.trim()}
+                onClick={createProfile}
+                className="rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? "Сохранение..." : "Добавить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

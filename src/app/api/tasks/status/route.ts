@@ -7,7 +7,7 @@ import {
   getTaskById,
   getTaskWithMetaById,
   isTaskStatus,
-  userCanAccessTaskGroup,
+  userCanAccessTask,
 } from "@/lib/tasks";
 import { publishTaskEvent } from "@/lib/task-events";
 
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const canAccess = await userCanAccessTaskGroup(auth.user, task.group_id);
+    const canAccess = await userCanAccessTask(auth.user, task);
     if (!canAccess) {
       return NextResponse.json({ error: "Forbidden for this task" }, { status: 403 });
     }

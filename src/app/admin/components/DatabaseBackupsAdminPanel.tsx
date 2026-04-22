@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -22,7 +22,6 @@ type CatalogBackupItem = {
 type ToolsStatus = {
   pgDump: boolean;
   pgRestore: boolean;
-  database: string;
 };
 
 function backupKindLabel(kind: BackupKind) {
@@ -48,11 +47,11 @@ export default function DatabaseBackupsAdminPanel() {
   const [backups, setBackups] = useState<BackupItem[]>([]);
   const [catalogBackups, setCatalogBackups] = useState<CatalogBackupItem[]>([]);
   const [tools, setTools] = useState<ToolsStatus | null>(null);
-  const [storageDir, setStorageDir] = useState("");
-  const [catalogStorageDir, setCatalogStorageDir] = useState("");
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [creatingCatalog, setCreatingCatalog] = useState(false);
+  const [deletingBackupFile, setDeletingBackupFile] = useState<string | null>(null);
+  const [deletingCatalogFile, setDeletingCatalogFile] = useState<string | null>(null);
   const [restoreFileName, setRestoreFileName] = useState<string | null>(null);
   const [restoreCatalogFileName, setRestoreCatalogFileName] = useState<string | null>(null);
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
@@ -90,11 +89,11 @@ export default function DatabaseBackupsAdminPanel() {
 
       const [dbData, catalogData] = await Promise.all([
         dbRes.json().catch(() => null) as Promise<
-          | { error?: string; backups?: BackupItem[]; tools?: ToolsStatus; storageDir?: string }
+          | { error?: string; backups?: BackupItem[]; tools?: ToolsStatus }
           | null
         >,
         catalogRes.json().catch(() => null) as Promise<
-          | { error?: string; backups?: CatalogBackupItem[]; storageDir?: string }
+          | { error?: string; backups?: CatalogBackupItem[] }
           | null
         >,
       ]);
@@ -109,8 +108,6 @@ export default function DatabaseBackupsAdminPanel() {
       setBackups(Array.isArray(dbData?.backups) ? dbData.backups : []);
       setCatalogBackups(Array.isArray(catalogData?.backups) ? catalogData.backups : []);
       setTools(dbData?.tools || null);
-      setStorageDir(dbData?.storageDir || "");
-      setCatalogStorageDir(catalogData?.storageDir || "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось загрузить резервные копии.");
     } finally {
@@ -179,6 +176,74 @@ export default function DatabaseBackupsAdminPanel() {
       setCreatingCatalog(false);
     }
   }, [loadBackups]);
+
+  const deleteBackup = useCallback(
+    async (fileName: string) => {
+      if (!confirm(`Удалить backup-файл "${fileName}"?`)) return;
+
+      setDeletingBackupFile(fileName);
+      setError(null);
+      setMessage(null);
+
+      try {
+        const res = await fetch(`/api/db-backups?fileName=${encodeURIComponent(fileName)}`, {
+          method: "DELETE",
+        });
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+
+        if (!res.ok) {
+          throw new Error(data?.error || "Не удалось удалить backup-файл.");
+        }
+
+        setBackups((current) => current.filter((item) => item.fileName !== fileName));
+        if (restoreFileName === fileName) {
+          setRestoreFileName(null);
+          setRestoreConfirmation("");
+        }
+        setMessage("Backup-файл удалён.");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Не удалось удалить backup-файл.");
+      } finally {
+        setDeletingBackupFile(null);
+      }
+    },
+    [restoreFileName]
+  );
+
+  const deleteCatalogBackupItem = useCallback(
+    async (fileName: string) => {
+      if (!confirm(`Удалить backup-файл "${fileName}"?`)) return;
+
+      setDeletingCatalogFile(fileName);
+      setError(null);
+      setMessage(null);
+
+      try {
+        const res = await fetch(`/api/catalog-backups?fileName=${encodeURIComponent(fileName)}`, {
+          method: "DELETE",
+        });
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+
+        if (!res.ok) {
+          throw new Error(data?.error || "Не удалось удалить backup-файл справочников.");
+        }
+
+        setCatalogBackups((current) => current.filter((item) => item.fileName !== fileName));
+        if (restoreCatalogFileName === fileName) {
+          setRestoreCatalogFileName(null);
+          setRestoreCatalogConfirmation("");
+        }
+        setMessage("Backup-файл справочников удалён.");
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Не удалось удалить backup-файл справочников."
+        );
+      } finally {
+        setDeletingCatalogFile(null);
+      }
+    },
+    [restoreCatalogFileName]
+  );
 
   const restoreBackup = useCallback(async () => {
     if (!selectedBackup) return;
@@ -260,11 +325,6 @@ export default function DatabaseBackupsAdminPanel() {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Резервные копии базы данных</h2>
-                <p className="mt-1 max-w-3xl text-sm text-slate-500">
-                  Безопасный режим: ручное создание dump, скачивание и восстановление с обязательным
-                  подтверждением. Перед restore система автоматически делает дополнительную копию
-                  текущей базы.
-                </p>
               </div>
 
               <button
@@ -277,169 +337,14 @@ export default function DatabaseBackupsAdminPanel() {
               </button>
             </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  База данных
-                </div>
-                <div className="mt-2 text-sm font-medium text-slate-900">
-                  {tools?.database || "—"}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  Утилиты PostgreSQL
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2 text-sm">
-                  <span
-                    className={`rounded-full px-2.5 py-1 ${
-                      tools?.pgDump
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-rose-50 text-rose-700"
-                    }`}
-                  >
-                    pg_dump {tools?.pgDump ? "найден" : "не найден"}
-                  </span>
-                  <span
-                    className={`rounded-full px-2.5 py-1 ${
-                      tools?.pgRestore
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-rose-50 text-rose-700"
-                    }`}
-                  >
-                    pg_restore {tools?.pgRestore ? "найден" : "не найден"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  Хранилище
-                </div>
-                <div className="mt-2 break-all text-sm text-slate-700">{storageDir || "—"}</div>
-              </div>
-            </div>
-
             {(!tools?.pgDump || !tools?.pgRestore) && (
               <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 Для работы backup-раздела PostgreSQL bin должен быть доступен в PATH или через
                 переменные окружения `PG_DUMP_PATH` и `PG_RESTORE_PATH`.
               </div>
             )}
-          </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">Автоматический backup</h3>
-                <p className="mt-1 max-w-3xl text-sm text-slate-500">
-                  Внутренний планировщик в `next start` не включаю намеренно: для dump базы это
-                  менее надежно, чем системный планировщик. Правильнее вешать автоматические
-                  backup-задачи через Windows Task Scheduler или отдельный сервис.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              Если нужен именно автоматический режим, следующим шагом правильнее добавить отдельную
-              интеграцию с системным планировщиком, а не запускать backup по таймеру внутри веб-приложения.
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">
-                  Справочник услуг и профили
-                </h3>
-                <p className="mt-1 max-w-3xl text-sm text-slate-500">
-                  Отдельный безопасный backup таблиц `services` и `profiles` в JSON. Этот режим
-                  работает без `pg_dump` и подходит именно для справочников.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={createCatalogBackup}
-                disabled={creatingCatalog}
-                className="rounded-2xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {creatingCatalog ? "Создание backup..." : "Backup справочников"}
-              </button>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Хранилище справочников
-              </div>
-              <div className="mt-2 break-all text-sm text-slate-700">
-                {catalogStorageDir || "—"}
-              </div>
-            </div>
-
-            <div className="mt-4">
-              {loading ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                  Загружаем backup-файлы справочников...
-                </div>
-              ) : catalogBackups.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                  Пока нет ни одного backup-файла для services/profiles.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {catalogBackups.map((backup) => (
-                    <div
-                      key={backup.fileName}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-slate-900">
-                          {backup.fileName}
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                          <span>{formatDate(backup.createdAt)}</span>
-                          <span>{formatBytes(backup.sizeBytes)}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex shrink-0 items-center gap-2">
-                        <a
-                          href={`/api/catalog-backups/download?fileName=${encodeURIComponent(backup.fileName)}`}
-                          className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
-                        >
-                          Скачать
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRestoreCatalogFileName(backup.fileName);
-                            setRestoreCatalogConfirmation("");
-                          }}
-                          className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-100"
-                        >
-                          Восстановить
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">Список backup-файлов</h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Можно скачать dump или восстановить базу из выбранной копии.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4">
+            <div className="mt-5">
               {loading ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                   Загружаем список резервных копий...
@@ -487,6 +392,89 @@ export default function DatabaseBackupsAdminPanel() {
                           className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Восстановить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteBackup(backup.fileName)}
+                          disabled={deletingBackupFile === backup.fileName || restoring}
+                          className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {deletingBackupFile === backup.fileName ? "Удаление..." : "Удалить"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Справочник услуг и профили</h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={createCatalogBackup}
+                disabled={creatingCatalog}
+                className="rounded-2xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {creatingCatalog ? "Создание backup..." : "Backup справочников"}
+              </button>
+            </div>
+
+            <div className="mt-5">
+              {loading ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                  Загружаем backup-файлы справочников...
+                </div>
+              ) : catalogBackups.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                  Пока нет ни одного backup-файла для services/profiles.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {catalogBackups.map((backup) => (
+                    <div
+                      key={backup.fileName}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-slate-900">
+                          {backup.fileName}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                          <span>{formatDate(backup.createdAt)}</span>
+                          <span>{formatBytes(backup.sizeBytes)}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2">
+                        <a
+                          href={`/api/catalog-backups/download?fileName=${encodeURIComponent(backup.fileName)}`}
+                          className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                          Скачать
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRestoreCatalogFileName(backup.fileName);
+                            setRestoreCatalogConfirmation("");
+                          }}
+                          className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-100"
+                        >
+                          Восстановить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteCatalogBackupItem(backup.fileName)}
+                          disabled={deletingCatalogFile === backup.fileName || restoringCatalog}
+                          className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {deletingCatalogFile === backup.fileName ? "Удаление..." : "Удалить"}
                         </button>
                       </div>
                     </div>
@@ -586,8 +574,7 @@ export default function DatabaseBackupsAdminPanel() {
                         Восстановление справочников
                       </div>
                       <div className="mt-1 text-sm text-slate-500">
-                        Будут восстановлены только таблицы `services` и `profiles`. Перед restore
-                        система создаст дополнительный JSON-backup текущих справочников.
+                        Будут восстановлены только таблицы `services` и `profiles`. Перед restore система создаст дополнительный JSON-backup текущих справочников.
                       </div>
                     </div>
                     <button

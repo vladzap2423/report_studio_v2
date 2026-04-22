@@ -24,7 +24,6 @@ type SigningPrepareContextRow = {
   step_order: number | null;
   signer_user_id: number | null;
   signer_name: string | null;
-  placement_mode: "last_page" | "all_pages" | null;
   column_count: number | null;
   x_ratio: number | null;
   y_ratio: number | null;
@@ -110,7 +109,6 @@ export async function POST(request: NextRequest) {
             active_step.step_order,
             active_step.signer_user_id,
             signer_user.name AS signer_name,
-            tst.placement_mode,
             tst.column_count,
             tst.x_ratio,
             tst.y_ratio,
@@ -176,14 +174,6 @@ export async function POST(request: NextRequest) {
         await client.query("ROLLBACK");
         return NextResponse.json(
           { error: "Р”Р»СЏ Р·Р°РґР°С‡Рё РЅРµ РЅР°СЃС‚СЂРѕРµРЅ С€Р°Р±Р»РѕРЅ СЂР°Р·РјРµС‰РµРЅРёСЏ С€С‚Р°РјРїРѕРІ" },
-          { status: 400 }
-        );
-      }
-
-      if (context.placement_mode === "all_pages") {
-        await client.query("ROLLBACK");
-        return NextResponse.json(
-          { error: "Р РµР¶РёРј СЂР°Р·РјРµС‰РµРЅРёСЏ С€С‚Р°РјРїР° РЅР° РІСЃРµС… Р»РёСЃС‚Р°С… РїРѕРєР° РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ РґР»СЏ СЂРµР°Р»СЊРЅРѕР№ PDF-РїРѕРґРїРёСЃРё. РСЃРїРѕР»СЊР·СѓР№С‚Рµ РїРѕСЃР»РµРґРЅРёР№ Р»РёСЃС‚." },
           { status: 400 }
         );
       }

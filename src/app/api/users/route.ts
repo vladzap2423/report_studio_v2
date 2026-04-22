@@ -165,13 +165,24 @@ export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
     const id = Number(body?.id);
-    const role = parseRole(body?.role);
+    const hasRoleUpdate = Object.prototype.hasOwnProperty.call(body || {}, "role");
+    const hasPasswordUpdate = Object.prototype.hasOwnProperty.call(body || {}, "password");
+    const role = hasRoleUpdate ? parseRole(body?.role) : null;
+    const password = hasPasswordUpdate ? normalizeString(body?.password) : null;
 
-    if (!Number.isFinite(id) || !role) {
-      return NextResponse.json({ error: "id and role are required" }, { status: 400 });
+    if (!Number.isFinite(id) || (!hasRoleUpdate && !hasPasswordUpdate)) {
+      return NextResponse.json({ error: "id and update field are required" }, { status: 400 });
     }
 
-    if (id === auth.user.id) {
+    if (hasRoleUpdate && !role) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+
+    if (hasPasswordUpdate && !password) {
+      return NextResponse.json({ error: "New password is required" }, { status: 400 });
+    }
+
+    if (hasRoleUpdate && id === auth.user.id) {
       return NextResponse.json(
         { error: "You cannot change your own role" },
         { status: 400 }
@@ -200,14 +211,14 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    if (!hasRequiredRole(auth.user.role, role)) {
+    if (hasRoleUpdate && role && !hasRequiredRole(auth.user.role, role)) {
       return NextResponse.json(
         { error: "You cannot assign role higher than yours" },
         { status: 403 }
       );
     }
 
-    if (target.role === "god" && role !== "god") {
+    if (hasRoleUpdate && target.role === "god" && role !== "god") {
       const godsRes = await dbQuery<{ count: string }>(
         `SELECT COUNT(*)::text AS count FROM users WHERE role = 'god'`
       );
@@ -220,18 +231,37 @@ export async function PUT(request: NextRequest) {
       }
     }
 
+    const updates: string[] = [];
+    const values: unknown[] = [];
+
+    if (hasRoleUpdate && role) {
+      values.push(role);
+      updates.push(`role = $${values.length}::user_role`);
+    }
+
+    if (hasPasswordUpdate && password) {
+      const passwordHash = await hashPassword(password);
+      values.push(passwordHash);
+      updates.push(`password = $${values.length}`);
+    }
+
+    if (updates.length === 0) {
+      return NextResponse.json({ error: "No changes to update" }, { status: 400 });
+    }
+
+    values.push(id);
     await dbQuery(
       `
         UPDATE users
-        SET role = $1::user_role
-        WHERE id = $2
+        SET ${updates.join(", ")}
+        WHERE id = $${values.length}
       `,
-      [role, id]
+      values
     );
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: "Failed to update role" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to update user" }, { status: 500 });
   }
 }

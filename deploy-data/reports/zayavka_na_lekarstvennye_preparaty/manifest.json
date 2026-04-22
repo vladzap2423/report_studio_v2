@@ -1,0 +1,10 @@
+{
+  "id": "zayavka_na_lekarstvennye_preparaty",
+  "title": "Заявка на лекарственные препараты",
+  "version": "1.0.0",
+  "description": "Получает при запуске таблицу Ecxel выгруженную с запроса Заявка на препараты и отдает итоговый файл.",
+  "outputs": {
+    "mode": "single",
+    "format": "xlsx"
+  }
+}

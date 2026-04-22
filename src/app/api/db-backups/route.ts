@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireApiRole } from "@/lib/require-api-role";
 import {
   createDbBackup,
+  deleteDbBackup,
   getBackupStorageDir,
   getBackupToolsStatus,
   listDbBackups,
@@ -40,6 +41,26 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Не удалось создать backup базы данных." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const auth = await requireApiRole(request, "god");
+  if ("response" in auth) return auth.response;
+
+  const fileName = request.nextUrl.searchParams.get("fileName");
+  if (!fileName) {
+    return NextResponse.json({ error: "Не указан backup-файл для удаления." }, { status: 400 });
+  }
+
+  try {
+    await deleteDbBackup(fileName);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Не удалось удалить backup-файл." },
       { status: 500 }
     );
   }

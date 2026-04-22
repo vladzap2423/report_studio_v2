@@ -4,10 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import SigningStampPreview from "@/app/components/SigningStampPreview";
 
-type SigningPlacementMode = "last_page" | "all_pages";
-
 export type SigningStampTemplateValue = {
-  placementMode: SigningPlacementMode;
+  placementMode: "last_page";
   columnCount: 1 | 2;
   xRatio: number;
   yRatio: number;
@@ -80,9 +78,6 @@ export default function SigningStampPlacementModal({
   const didMountRef = useRef(false);
 
   const [mounted, setMounted] = useState(false);
-  const [placementMode, setPlacementMode] = useState<SigningPlacementMode>(
-    initialValue?.placementMode ?? "last_page"
-  );
   const [columnCount, setColumnCount] = useState<1 | 2>(normalizeColumnCount(initialValue?.columnCount));
   const [pageSize, setPageSize] = useState<PageSize | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -280,7 +275,7 @@ export default function SigningStampPlacementModal({
           <div className="min-h-0 overflow-auto bg-slate-100/75 px-6 py-6">
             <div className="mx-auto flex w-fit flex-col items-center gap-3">
               <div className="rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm">
-                PDF • {pageCount > 0 ? `${pageCount} стр.` : "загрузка"} • {placementMode === "last_page" ? "штампы только на последнем листе" : "штампы на всех листах"}
+                PDF • {pageCount > 0 ? `${pageCount} стр.` : "загрузка"} • штампы только на последнем листе
               </div>
 
               <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
@@ -346,42 +341,6 @@ export default function SigningStampPlacementModal({
               <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Настройки</div>
 
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="text-sm font-semibold text-slate-900">Куда ставить блок штампов</div>
-                <div className="mt-3 space-y-2">
-                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 transition hover:border-slate-300">
-                    <input
-                      type="radio"
-                      name="placementMode"
-                      className="mt-0.5 h-4 w-4 border-slate-300 text-slate-900"
-                      checked={placementMode === "last_page"}
-                      onChange={() => setPlacementMode("last_page")}
-                    />
-                    <span>
-                      <span className="block font-medium text-slate-900">Только на последнем листе</span>
-                      <span className="mt-0.5 block text-xs text-slate-500">
-                        Базовый и самый безопасный вариант для многошагового подписания.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 transition hover:border-slate-300">
-                    <input
-                      type="radio"
-                      name="placementMode"
-                      className="mt-0.5 h-4 w-4 border-slate-300 text-slate-900"
-                      checked={placementMode === "all_pages"}
-                      onChange={() => setPlacementMode("all_pages")}
-                    />
-                    <span>
-                      <span className="block font-medium text-slate-900">На всех листах</span>
-                      <span className="mt-0.5 block text-xs text-slate-500">
-                        Блок будет повторяться на каждой странице PDF в одинаковом месте.
-                      </span>
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                 <div className="text-sm font-semibold text-slate-900">Компоновка штампов</div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   {[1, 2].map((value) => {
@@ -439,7 +398,7 @@ export default function SigningStampPlacementModal({
                 onClick={() => {
                   if (!pageSize) return;
                   onConfirm({
-                    placementMode,
+                    placementMode: "last_page",
                     columnCount,
                     xRatio: blockPosition.x / pageSize.width,
                     yRatio: blockPosition.y / pageSize.height,

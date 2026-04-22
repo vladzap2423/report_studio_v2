@@ -23,6 +23,22 @@ function toSseMessage(event: string, payload: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
 
+function userCanReceiveTaskPayload(task: unknown, userId: number) {
+  if (!task || typeof task !== "object") return true;
+
+  const candidate = task as {
+    kind?: unknown;
+    creator_id?: unknown;
+    signing_participant_ids?: unknown;
+  };
+
+  if (candidate.kind !== "signing") return true;
+  if (Number(candidate.creator_id) === Number(userId)) return true;
+  if (!Array.isArray(candidate.signing_participant_ids)) return false;
+
+  return candidate.signing_participant_ids.some((id) => Number(id) === Number(userId));
+}
+
 export async function GET(request: NextRequest) {
   const auth = await requireApiRole(request, "user");
   if (auth.response) return auth.response;
@@ -65,6 +81,7 @@ export async function GET(request: NextRequest) {
 
       const unsubscribe = subscribeTaskEvents((payload) => {
         if (!allowedGroupIdsSet.has(payload.groupId)) return;
+        if (!userCanReceiveTaskPayload(payload.task, auth.user.id)) return;
 
         if (
           (payload.type === "task_transferred" || payload.type === "task_comment_added") &&

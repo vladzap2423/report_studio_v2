@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
-import { appendTaskHistory, getTaskById, getTaskWithMetaById, userCanAccessTaskGroup } from "@/lib/tasks";
+import { appendTaskHistory, getTaskById, getTaskWithMetaById, userCanAccessTask } from "@/lib/tasks";
 import { publishTaskEvent } from "@/lib/task-events";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const canAccess = await userCanAccessTaskGroup(auth.user, task.group_id);
+    const canAccess = await userCanAccessTask(auth.user, task);
     if (!canAccess) {
       return NextResponse.json({ error: "Forbidden for this task" }, { status: 403 });
     }
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const canAccess = await userCanAccessTaskGroup(auth.user, task.group_id);
+    const canAccess = await userCanAccessTask(auth.user, task);
     if (!canAccess) {
       return NextResponse.json({ error: "Forbidden for this task" }, { status: 403 });
     }

@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 import path from "path";
 import { spawn } from "child_process";
@@ -37,7 +37,7 @@ function getPgConnectionConfig(): PgConnectionConfig {
     const database = url.pathname.replace(/^\//, "");
 
     if (!database || !url.username) {
-      throw new Error("Не удалось определить параметры PostgreSQL из DATABASE_URL.");
+      throw new Error("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РїР°СЂР°РјРµС‚СЂС‹ PostgreSQL РёР· DATABASE_URL.");
     }
 
     return {
@@ -56,7 +56,7 @@ function getPgConnectionConfig(): PgConnectionConfig {
   const port = process.env.PG_PORT || "5432";
 
   if (!user || !password || !database) {
-    throw new Error("DATABASE_URL или PG_USER/PG_PASSWORD/PG_DB должны быть заданы.");
+    throw new Error("DATABASE_URL РёР»Рё PG_USER/PG_PASSWORD/PG_DB РґРѕР»Р¶РЅС‹ Р±С‹С‚СЊ Р·Р°РґР°РЅС‹.");
   }
 
   return {
@@ -126,8 +126,8 @@ function runProcess(command: string, args: string[], password: string) {
         reject(
           new Error(
             command.includes("pg_restore")
-              ? "Утилита pg_restore не найдена. Добавьте PostgreSQL bin в PATH или задайте PG_RESTORE_PATH."
-              : "Утилита pg_dump не найдена. Добавьте PostgreSQL bin в PATH или задайте PG_DUMP_PATH."
+              ? "РЈС‚РёР»РёС‚Р° pg_restore РЅРµ РЅР°Р№РґРµРЅР°. Р”РѕР±Р°РІСЊС‚Рµ PostgreSQL bin РІ PATH РёР»Рё Р·Р°РґР°Р№С‚Рµ PG_RESTORE_PATH."
+              : "РЈС‚РёР»РёС‚Р° pg_dump РЅРµ РЅР°Р№РґРµРЅР°. Р”РѕР±Р°РІСЊС‚Рµ PostgreSQL bin РІ PATH РёР»Рё Р·Р°РґР°Р№С‚Рµ PG_DUMP_PATH."
           )
         );
         return;
@@ -145,7 +145,7 @@ function runProcess(command: string, args: string[], password: string) {
         return;
       }
 
-      const message = stderr.trim() || `Процесс завершился с кодом ${code ?? "unknown"}.`;
+      const message = stderr.trim() || `РџСЂРѕС†РµСЃСЃ Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РєРѕРґРѕРј ${code ?? "unknown"}.`;
       reject(new Error(message));
     });
   });
@@ -159,7 +159,7 @@ function parseBackupKind(fileName: string): BackupKind {
 
 function getBackupFilePath(fileName: string) {
   if (!SAFE_BACKUP_FILE_RE.test(fileName)) {
-    throw new Error("Некорректное имя backup-файла.");
+    throw new Error("РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ backup-С„Р°Р№Р»Р°.");
   }
   return path.join(BACKUP_DIR, fileName);
 }
@@ -195,17 +195,20 @@ export async function listDbBackups(): Promise<DbBackupInfo[]> {
   const entries = await fs.readdir(BACKUP_DIR, { withFileTypes: true });
   const files = entries.filter((entry) => entry.isFile() && SAFE_BACKUP_FILE_RE.test(entry.name));
 
-  const backups = await Promise.all(
-    files.map(async (entry) => {
-      const stat = await fs.stat(path.join(BACKUP_DIR, entry.name));
-      return {
-        fileName: entry.name,
-        kind: parseBackupKind(entry.name),
-        sizeBytes: stat.size,
-        createdAt: stat.mtime.toISOString(),
-      } satisfies DbBackupInfo;
-    })
-  );
+  const backups = (
+    await Promise.all(
+      files.map(async (entry) => {
+        const stat = await fs.stat(path.join(BACKUP_DIR, entry.name));
+        if (stat.size <= 0) return null;
+        return {
+          fileName: entry.name,
+          kind: parseBackupKind(entry.name),
+          sizeBytes: stat.size,
+          createdAt: stat.mtime.toISOString(),
+        } satisfies DbBackupInfo;
+      })
+    )
+  ).filter((item): item is DbBackupInfo => item !== null);
 
   backups.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   return backups;
@@ -219,25 +222,30 @@ async function createDbBackupInternal(kind: BackupKind) {
   const fileName = `${kind}__${timestamp}__${databasePart}.dump`;
   const filePath = path.join(BACKUP_DIR, fileName);
 
-  await runProcess(
-    getBackupToolPath("dump"),
-    [
-      "--format=custom",
-      "--no-owner",
-      "--no-privileges",
-      "--host",
-      config.host,
-      "--port",
-      config.port,
-      "--username",
-      config.user,
-      "--dbname",
-      config.database,
-      "--file",
-      filePath,
-    ],
-    config.password
-  );
+  try {
+    await runProcess(
+      getBackupToolPath("dump"),
+      [
+        "--format=custom",
+        "--no-owner",
+        "--no-privileges",
+        "--host",
+        config.host,
+        "--port",
+        config.port,
+        "--username",
+        config.user,
+        "--dbname",
+        config.database,
+        "--file",
+        filePath,
+      ],
+      config.password
+    );
+  } catch (error) {
+    await fs.rm(filePath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 
   const stat = await fs.stat(filePath);
 
@@ -251,7 +259,7 @@ async function createDbBackupInternal(kind: BackupKind) {
 
 export async function createDbBackup(kind: BackupKind = "manual") {
   if (global.__rsDbBackupBusy) {
-    throw new Error("Операция backup/restore уже выполняется. Дождитесь завершения.");
+    throw new Error("РћРїРµСЂР°С†РёСЏ backup/restore СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ. Р”РѕР¶РґРёС‚РµСЃСЊ Р·Р°РІРµСЂС€РµРЅРёСЏ.");
   }
 
   global.__rsDbBackupBusy = true;
@@ -262,9 +270,19 @@ export async function createDbBackup(kind: BackupKind = "manual") {
   }
 }
 
-export async function restoreDbBackup(fileName: string) {
+export async function deleteDbBackup(fileName: string) {
   if (global.__rsDbBackupBusy) {
     throw new Error("Операция backup/restore уже выполняется. Дождитесь завершения.");
+  }
+
+  const filePath = getBackupFilePath(fileName);
+  await fs.access(filePath);
+  await fs.rm(filePath, { force: false });
+}
+
+export async function restoreDbBackup(fileName: string) {
+  if (global.__rsDbBackupBusy) {
+    throw new Error("РћРїРµСЂР°С†РёСЏ backup/restore СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ. Р”РѕР¶РґРёС‚РµСЃСЊ Р·Р°РІРµСЂС€РµРЅРёСЏ.");
   }
 
   global.__rsDbBackupBusy = true;
@@ -311,3 +329,4 @@ export async function readBackupFile(fileName: string) {
     fileName,
   };
 }
+

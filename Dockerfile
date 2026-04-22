@@ -10,10 +10,17 @@ WORKDIR /app
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    gnupg \
+  && wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
     python3 \
     python3-venv \
     python3-pip \
-    postgresql-client \
+    postgresql-client-16 \
     fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 

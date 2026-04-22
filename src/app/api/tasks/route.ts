@@ -12,6 +12,7 @@ import {
   isTaskKind,
   isTaskPriority,
   isTaskStatus,
+  userCanAccessTask,
   userCanAccessTaskGroup,
   type TaskKind,
   type TaskPriority,
@@ -23,7 +24,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type TaskListItem = TaskWithMetaRow;
-type SigningPlacementMode = "last_page" | "all_pages";
+type SigningPlacementMode = "last_page";
 type SigningStampTemplate = {
   placementMode: SigningPlacementMode;
   columnCount: 1 | 2;
@@ -69,7 +70,7 @@ function parseJsonField(value: FormDataEntryValue | null) {
 }
 
 function isSigningPlacementMode(value: unknown): value is SigningPlacementMode {
-  return value === "last_page" || value === "all_pages";
+  return value === "last_page";
 }
 
 function isFiniteRatio(value: unknown) {
@@ -177,6 +178,22 @@ export async function GET(request: NextRequest) {
     const params: unknown[] = [groupId];
     const where: string[] = ["t.group_id = $1"];
 
+    params.push(auth.user.id);
+    const currentUserParam = params.length;
+    where.push(`
+      (
+        t.kind <> 'signing'
+        OR t.creator_id = $${currentUserParam}
+        OR EXISTS (
+          SELECT 1
+          FROM task_signing_routes access_tsr
+          INNER JOIN task_signing_steps access_tss ON access_tss.route_id = access_tsr.id
+          WHERE access_tsr.task_id = t.id
+            AND access_tss.signer_user_id = $${currentUserParam}
+        )
+      )
+    `);
+
     if (statusRaw && statusRaw !== "all") {
       if (!isTaskStatus(statusRaw)) {
         return NextResponse.json({ error: "Invalid status filter" }, { status: 400 });
@@ -195,7 +212,22 @@ export async function GET(request: NextRequest) {
 
     if (mineOnly) {
       params.push(auth.user.id);
-      where.push(`(t.assignee_id = $${params.length} OR t.creator_id = $${params.length})`);
+      where.push(`
+        (
+          t.assignee_id = $${params.length}
+          OR t.creator_id = $${params.length}
+          OR (
+            t.kind = 'signing'
+            AND EXISTS (
+              SELECT 1
+              FROM task_signing_routes mine_tsr
+              INNER JOIN task_signing_steps mine_tss ON mine_tss.route_id = mine_tsr.id
+              WHERE mine_tsr.task_id = t.id
+                AND mine_tss.signer_user_id = $${params.length}
+            )
+          )
+        )
+      `);
     }
 
     if (search) {
@@ -230,10 +262,11 @@ export async function GET(request: NextRequest) {
           td.mime_type AS document_mime_type,
           COALESCE(steps.signer_count, 0) AS signer_count,
           COALESCE(steps.signed_count, 0) AS signed_count,
-          tst.placement_mode AS signing_placement_mode,
+          CASE WHEN t.kind = 'signing' THEN 'last_page' ELSE NULL END AS signing_placement_mode,
           current_step.signing_current_signer_id,
           current_step.signing_current_signer_name,
-          current_step.signing_current_step_order
+          current_step.signing_current_step_order,
+          COALESCE(signing_participants.signing_participant_ids, ARRAY[]::bigint[]) AS signing_participant_ids
         FROM tasks t
         INNER JOIN users cu ON cu.id = t.creator_id
         LEFT JOIN users au ON au.id = t.assignee_id
@@ -259,6 +292,15 @@ export async function GET(request: NextRequest) {
           ORDER BY tss.step_order ASC
           LIMIT 1
         ) current_step ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(
+              array_agg(DISTINCT tss.signer_user_id) FILTER (WHERE tss.signer_user_id IS NOT NULL),
+              ARRAY[]::bigint[]
+            ) AS signing_participant_ids
+          FROM task_signing_steps tss
+          WHERE tss.route_id = tsr.id
+        ) signing_participants ON TRUE
         WHERE ${where.join(" AND ")}
         ORDER BY
           CASE t.priority
@@ -412,7 +454,8 @@ export async function POST(request: NextRequest) {
           NULL::text AS signing_placement_mode,
           NULL::bigint AS signing_current_signer_id,
           NULL::text AS signing_current_signer_name,
-          NULL::int AS signing_current_step_order
+          NULL::int AS signing_current_step_order,
+          ARRAY[]::bigint[] AS signing_participant_ids
       `,
       [
         groupId,
@@ -509,7 +552,7 @@ export async function POST(request: NextRequest) {
           `,
           [
             task.id,
-            stampTemplate?.placementMode ?? "last_page",
+            "last_page",
             stampTemplate?.columnCount ?? 1,
             stampTemplate?.xRatio ?? 0,
             stampTemplate?.yRatio ?? 0,
@@ -542,7 +585,7 @@ export async function POST(request: NextRequest) {
         assignee_id: task.assignee_id,
         group_id: task.group_id,
         signer_ids: signerIds,
-        signing_placement_mode: stampTemplate?.placementMode ?? null,
+        signing_placement_mode: "last_page",
         signing_column_count: stampTemplate?.columnCount ?? null,
       }
     );
@@ -583,7 +626,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const canAccess = await userCanAccessTaskGroup(auth.user, existing.group_id);
+    const canAccess = await userCanAccessTask(auth.user, existing);
     if (!canAccess) {
       return NextResponse.json({ error: "Forbidden for this task" }, { status: 403 });
     }

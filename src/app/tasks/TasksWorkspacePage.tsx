@@ -17,7 +17,7 @@ type TaskStatus = "new" | "in_progress" | "blocked" | "review" | "done" | "cance
 type TaskPriority = "low" | "medium" | "high";
 type TaskKind = "task" | "signing";
 type TaskBucket = "in_progress" | "done" | "queue";
-type SigningPlacementMode = "last_page" | "all_pages";
+type SigningPlacementMode = "last_page";
 
 type CurrentUser = {
   id: number;
@@ -70,6 +70,7 @@ type TaskItem = {
   signing_current_signer_id?: number | null;
   signing_current_signer_name?: string | null;
   signing_current_step_order?: number | null;
+  signing_participant_ids?: Array<number | string>;
 };
 
 type TaskComment = {
@@ -91,6 +92,11 @@ type TaskQueueSignal = {
 function normalizeId(value: unknown) {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeIdList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeId).filter((id) => id > 0);
 }
 
 function normalizeCurrentUser(user: CurrentUser | null) {
@@ -126,13 +132,13 @@ function normalizeTaskItem(task: TaskItem): TaskItem {
     document_mime_type: task.document_mime_type ?? null,
     signer_count: task.signer_count == null ? 0 : Number(task.signer_count),
     signed_count: task.signed_count == null ? 0 : Number(task.signed_count),
-    signing_placement_mode:
-      task.signing_placement_mode === "all_pages" ? "all_pages" : task.signing_placement_mode === "last_page" ? "last_page" : null,
+    signing_placement_mode: task.signing_placement_mode === "last_page" ? "last_page" : null,
     signing_current_signer_id:
       task.signing_current_signer_id == null ? null : normalizeId(task.signing_current_signer_id),
     signing_current_signer_name: task.signing_current_signer_name ?? null,
     signing_current_step_order:
       task.signing_current_step_order == null ? null : Number(task.signing_current_step_order),
+    signing_participant_ids: normalizeIdList(task.signing_participant_ids),
   };
 }
 
@@ -429,7 +435,10 @@ export default function TasksWorkspacePage() {
     if (!selectedMemberId) return [];
     return tasks.filter((task) => {
       if (task.kind === "signing") {
-        return true;
+        return (
+          task.creator_id === selectedMemberId ||
+          (task.signing_participant_ids ?? []).includes(selectedMemberId)
+        );
       }
       return task.assignee_id === selectedMemberId;
     });
@@ -1296,6 +1305,10 @@ export default function TasksWorkspacePage() {
                             task.status === "blocked" ||
                             task.status === "review";
                           const canReturnToRework = task.status === "done";
+                          const canEditPriority =
+                            canManageSelectedTasks &&
+                            task.status !== "done" &&
+                            task.status !== "canceled";
                           const canSignNow =
                             task.kind === "signing" &&
                             canManageSelectedTasks &&
@@ -1326,20 +1339,16 @@ export default function TasksWorkspacePage() {
                                   )}
                                   {task.kind === "signing" && (
                                     <div className="mt-1 text-xs text-slate-400">
-                                      {`Маршрут: ${task.signed_count || 0} из ${task.signer_count || 0} подписант(ов) • ${
+                                      {`Маршрут: ${task.signed_count || 0} из ${task.signer_count || 0} подписант(ов) ? ${
                                         task.signing_current_signer_name
-                                          ? `сейчас подписывает ${task.signing_current_signer_name} • `
+                                          ? `сейчас подписывает ${task.signing_current_signer_name} ? `
                                           : ""
-                                      }штампы ${
-                                        task.signing_placement_mode === "all_pages"
-                                          ? "на всех листах"
-                                          : "на последнем листе"
-                                      }`}
+                                      }штампы на последнем листе`}
                                     </div>
                                   )}
                                 </div>
 
-                                {canManageSelectedTasks ? (
+                                {canEditPriority ? (
                                   <AppSelect
                                     value={task.priority}
                                     onChange={(event) =>
@@ -1348,7 +1357,7 @@ export default function TasksWorkspacePage() {
                                     disabled={savingPriorityId === task.id}
                                     aria-label="Изменить приоритет задачи"
                                     wrapperClassName={cls(
-                                      "w-[108px] rounded-full border transition",
+                                      "w-[136px] min-w-[136px] rounded-full border transition",
                                       PRIORITY_CLASSES[task.priority]
                                     )}
                                     selectClassName="h-7 pl-3 pr-7 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-60"
@@ -1513,14 +1522,15 @@ export default function TasksWorkspacePage() {
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-4">
           <form
             onSubmit={(event) => void createTask(event)}
-            className="my-auto flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white p-5 shadow-2xl"
+            className="my-auto flex max-h-[92vh] w-full max-w-lg flex-col overflow-visible rounded-[24px] border border-slate-200 bg-white p-5 shadow-2xl"
           >
             <h3 className="text-base font-semibold text-slate-900">Создание задачи</h3>
             <p className="mt-1 text-xs text-slate-500">
               Новая задача будет добавлена во вкладку «В очереди».
             </p>
 
-            <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
+              <div className="space-y-3 px-1 py-1">
               <AppSelect
                 value={createKind}
                 onChange={(event) => {
@@ -1677,9 +1687,7 @@ export default function TasksWorkspacePage() {
                         {createStampTemplate ? (
                           <>
                             {"Блок штампов размещён: "}
-                            {createStampTemplate.placementMode === "all_pages"
-                              ? "на всех листах"
-                              : "на последнем листе"}
+                            {"на последнем листе"}
                           </>
                         ) : (
                           "Шаблон ещё не настроен"
@@ -1697,6 +1705,7 @@ export default function TasksWorkspacePage() {
                   </div>
                 </div>
               )}
+              </div>
             </div>
 
             <div className="mt-5 flex shrink-0 justify-end gap-2">

@@ -11,6 +11,7 @@ import UsersAdminPanel from "./components/UsersAdminPanel";
 import PasswordPadAdminPage from "./components/PasswordPadAdminPage";
 import TaskGroupsAdminPanel from "./components/TaskGroupsAdminPanel";
 import DatabaseBackupsAdminPanel from "./components/DatabaseBackupsAdminPanel";
+import PasswordGeneratorAdminPanel from "./components/PasswordGeneratorAdminPanel";
 
 type Section =
   | "services"
@@ -18,6 +19,7 @@ type Section =
   | "reports"
   | "users"
   | "arduino"
+  | "passwords"
   | "tasks"
   | "backups";
 
@@ -54,6 +56,7 @@ const sectionGroups: {
     description: "Другие...",
     items: [
       { id: "backups", label: "Резервные копии" },
+      { id: "passwords", label: "Генератор паролей" },
       { id: "arduino", label: "Ардуино" },
     ],
   },
@@ -65,6 +68,7 @@ function normalizeSection(input: string | null | undefined): Section | null {
   if (input === "tasks") return "tasks";
   if (input === "reports") return "reports";
   if (input === "arduino") return "arduino";
+  if (input === "passwords") return "passwords";
   if (input === "services") return "services";
   if (input === "backups") return "backups";
   return null;
@@ -79,6 +83,7 @@ function getAllowedSections(role: UserRole): Section[] {
       "reports",
       "tasks",
       "backups",
+      "passwords",
       "arduino",
     ];
   }
@@ -129,6 +134,7 @@ function renderSection(section: Section) {
   if (section === "tasks") return <TaskGroupsAdminPanel />;
   if (section === "reports") return <ReportsManifestAdminPanel />;
   if (section === "backups") return <DatabaseBackupsAdminPanel />;
+  if (section === "passwords") return <PasswordGeneratorAdminPanel />;
   return <PasswordPadAdminPage />;
 }
 

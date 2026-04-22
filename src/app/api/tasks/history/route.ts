@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
-import { getTaskById, userCanAccessTaskGroup } from "@/lib/tasks";
+import { getTaskById, userCanAccessTask } from "@/lib/tasks";
 
 type TaskHistoryRow = {
   id: number;
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const canAccess = await userCanAccessTaskGroup(auth.user, task.group_id);
+    const canAccess = await userCanAccessTask(auth.user, task);
     if (!canAccess) {
       return NextResponse.json({ error: "Forbidden for this task" }, { status: 403 });
     }

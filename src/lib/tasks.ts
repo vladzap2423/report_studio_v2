@@ -16,7 +16,7 @@ export const TASK_KIND_VALUES = ["task", "signing"] as const;
 export type TaskStatus = (typeof TASK_STATUS_VALUES)[number];
 export type TaskPriority = (typeof TASK_PRIORITY_VALUES)[number];
 export type TaskKind = (typeof TASK_KIND_VALUES)[number];
-export type SigningPlacementMode = "last_page" | "all_pages";
+export type SigningPlacementMode = "last_page";
 
 const TASK_STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   new: ["in_progress", "canceled"],
@@ -90,20 +90,10 @@ export type TaskWithMetaRow = TaskRow & {
   signing_current_signer_id: number | null;
   signing_current_signer_name: string | null;
   signing_current_step_order: number | null;
+  signing_participant_ids: Array<number | string>;
 };
 
 export async function getAccessibleTaskGroups(user: SessionUser): Promise<TaskGroupRow[]> {
-  if (user.role === "god") {
-    const groupsRes = await dbQuery<TaskGroupRow>(
-      `
-        SELECT id, name, description, is_active, created_by, created_at, updated_at
-        FROM task_groups
-        ORDER BY is_active DESC, name ASC, id ASC
-      `
-    );
-    return groupsRes.rows;
-  }
-
   const groupsRes = await dbQuery<TaskGroupRow>(
     `
       SELECT g.id, g.name, g.description, g.is_active, g.created_by, g.created_at, g.updated_at
@@ -119,19 +109,6 @@ export async function getAccessibleTaskGroups(user: SessionUser): Promise<TaskGr
 }
 
 export async function userCanAccessTaskGroup(user: SessionUser, groupId: number) {
-  if (user.role === "god") {
-    const res = await dbQuery<{ id: number }>(
-      `
-        SELECT id
-        FROM task_groups
-        WHERE id = $1
-        LIMIT 1
-      `,
-      [groupId]
-    );
-    return (res.rowCount || 0) > 0;
-  }
-
   const res = await dbQuery<{ group_id: number }>(
     `
       SELECT m.group_id
@@ -144,6 +121,27 @@ export async function userCanAccessTaskGroup(user: SessionUser, groupId: number)
     `,
     [groupId, user.id]
   );
+  return (res.rowCount || 0) > 0;
+}
+
+export async function userCanAccessTask(user: SessionUser, task: TaskRow) {
+  const canAccessGroup = await userCanAccessTaskGroup(user, task.group_id);
+  if (!canAccessGroup) return false;
+  if (task.kind !== "signing") return true;
+  if (Number(task.creator_id) === Number(user.id)) return true;
+
+  const res = await dbQuery<{ id: number }>(
+    `
+      SELECT tss.id
+      FROM task_signing_routes tsr
+      INNER JOIN task_signing_steps tss ON tss.route_id = tsr.id
+      WHERE tsr.task_id = $1
+        AND tss.signer_user_id = $2
+      LIMIT 1
+    `,
+    [task.id, user.id]
+  );
+
   return (res.rowCount || 0) > 0;
 }
 
@@ -227,10 +225,11 @@ export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaR
         td.mime_type AS document_mime_type,
         COALESCE(steps.signer_count, 0) AS signer_count,
         COALESCE(steps.signed_count, 0) AS signed_count,
-        tst.placement_mode AS signing_placement_mode,
+        CASE WHEN t.kind = 'signing' THEN 'last_page' ELSE NULL END AS signing_placement_mode,
         current_step.signing_current_signer_id,
         current_step.signing_current_signer_name,
-        current_step.signing_current_step_order
+        current_step.signing_current_step_order,
+        COALESCE(signing_participants.signing_participant_ids, ARRAY[]::bigint[]) AS signing_participant_ids
       FROM tasks t
       INNER JOIN users cu ON cu.id = t.creator_id
       LEFT JOIN users au ON au.id = t.assignee_id
@@ -256,6 +255,15 @@ export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaR
         ORDER BY tss.step_order ASC
         LIMIT 1
       ) current_step ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(
+            array_agg(DISTINCT tss.signer_user_id) FILTER (WHERE tss.signer_user_id IS NOT NULL),
+            ARRAY[]::bigint[]
+          ) AS signing_participant_ids
+        FROM task_signing_steps tss
+        WHERE tss.route_id = tsr.id
+      ) signing_participants ON TRUE
       WHERE t.id = $1
       LIMIT 1
     `,

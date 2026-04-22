@@ -1,0 +1,10 @@
+{
+  "id": "zayavka",
+  "title": "Заявка",
+  "version": "1.0.0",
+  "description": "Сбор лекарственных препаратов в итоговую таблицу",
+  "outputs": {
+    "mode": "single",
+    "format": "xlsx"
+  }
+}

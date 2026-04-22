@@ -1,9 +1,9 @@
 ﻿"use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VirtualItem, useVirtualizer } from "@tanstack/react-virtual";
 import AppSelect from "@/app/components/AppSelect";
-import { useToastSync } from "@/app/components/AppToastProvider";
+import EditModeButton from "@/app/components/EditModeButton";
 
 type Service = {
   id: number;
@@ -22,19 +22,8 @@ export default function ServicesAdminPanel() {
   const [isEditing, setIsEditing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
 
   const parentRef = useRef<HTMLDivElement>(null);
-  const importFileRef = useRef<HTMLInputElement | null>(null);
-
-  useToastSync({
-    error: importError,
-    clearError: () => setImportError(null),
-    message: importMessage,
-    clearMessage: () => setImportMessage(null),
-  });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -96,52 +85,6 @@ export default function ServicesAdminPanel() {
     }
   };
 
-  const runImport = async (file: File) => {
-    setImportError(null);
-    setImportMessage(null);
-    setImportLoading(true);
-
-    try {
-      const form = new FormData();
-      form.append("file", file);
-
-      const res = await fetch("/api/services/import", {
-        method: "POST",
-        body: form,
-      });
-
-      const body = (await res.json().catch(() => null)) as
-        | { inserted?: number; error?: string }
-        | null;
-
-      if (!res.ok) {
-        throw new Error(body?.error || "Не удалось загрузить данные");
-      }
-
-      setImportMessage(`Импорт завершен. Загружено строк: ${body?.inserted || 0}`);
-      await loadData();
-    } catch (error: any) {
-      setImportError(error?.message || "Не удалось загрузить данные");
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
-  const onImportPick = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const lower = file.name.toLowerCase();
-    if (!lower.endsWith(".xlsx") && !lower.endsWith(".xls")) {
-      setImportError("Нужен Excel файл .xlsx или .xls");
-      event.target.value = "";
-      return;
-    }
-
-    await runImport(file);
-    event.target.value = "";
-  };
-
   const deleteService = async (id: number) => {
     if (!confirm("Удалить услугу?")) return;
 
@@ -193,45 +136,15 @@ export default function ServicesAdminPanel() {
       {loading && <div className="mb-4 text-sm text-gray-500">Загрузка данных...</div>}
 
       <div className="mb-5 flex flex-wrap items-center gap-4">
-        <button
-          type="button"
-          onClick={() => setIsEditing((prev) => !prev)}
-          className={`rounded-2xl px-4 py-1.5 text-sm font-medium text-white ${
-            isEditing ? "bg-amber-600 hover:bg-amber-500" : "bg-slate-900 hover:bg-slate-800"
-          }`}
-        >
-          {isEditing ? "Редактирование включено" : "Редактировать"}
-        </button>
-        <button
-          type="button"
-          disabled={importLoading}
-          onClick={() => importFileRef.current?.click()}
-          className="rounded-2xl bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-        >
-          {importLoading ? "Загрузка..." : "Подгрузить данные"}
-        </button>
+        <EditModeButton active={isEditing} onClick={() => setIsEditing((prev) => !prev)} />
         <input
           type="search"
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
           placeholder="Поиск по коду или названию"
-          className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white/70 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-4 focus:ring-slate-200"
-        />
-
-        <input
-          ref={importFileRef}
-          type="file"
-          accept=".xlsx,.xls"
-          className="hidden"
-          onChange={onImportPick}
+          className="ml-auto w-full max-w-sm rounded-2xl border border-slate-300 bg-white/70 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-4 focus:ring-slate-200"
         />
       </div>
-
-      <p className="mb-3 text-xs text-gray-500">
-        Формат Excel: первая строка заголовки. Обязательные колонки: code, name, med, profile.
-        Поддерживаются и русские: Код прайса, Услуга, Медикаменты, Профиль.
-        Импорт полностью заменяет таблицу services.
-      </p>
 
       <div className={`${servicesGridClass} rounded-t-lg border border-gray-200 bg-gray-50/90 px-2 py-1 font-medium text-gray-600`}>
         <div>Код услуги</div>
