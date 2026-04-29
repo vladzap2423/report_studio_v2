@@ -130,24 +130,26 @@ export default function ProfilesAdminPanel() {
 
   return (
     <div className="h-full overflow-auto p-4">
-      <h2 className="mb-4 text-xl font-semibold text-slate-900">Профили</h2>
-
-      <div className="mb-4 flex items-center gap-2">
-        <EditModeButton active={isEditing} onClick={() => setIsEditing((prev) => !prev)} />
-        <button
-          type="button"
-          disabled={!isEditing}
-          onClick={() => {
-            setError(null);
-            setMessage(null);
-            setNewProfile("");
-            setIsCreateModalOpen(true);
-          }}
-          className="ml-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-xl leading-none text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Добавить профиль"
-        >
-          +
-        </button>
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold text-slate-900">Профили</h2>
+        <div className="flex items-center gap-2">
+          <EditModeButton active={isEditing} onClick={() => setIsEditing((prev) => !prev)} />
+          <button
+            type="button"
+            disabled={!isEditing}
+            onClick={() => {
+              setError(null);
+              setMessage(null);
+              setNewProfile("");
+              setIsCreateModalOpen(true);
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-xl leading-none text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Добавить профиль"
+            title="Добавить профиль"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {loading && <div className="mb-3 text-sm text-gray-500">Загрузка...</div>}

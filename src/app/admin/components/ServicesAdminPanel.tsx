@@ -135,15 +135,15 @@ export default function ServicesAdminPanel() {
     <div className="flex h-full min-h-0 flex-col p-4">
       {loading && <div className="mb-4 text-sm text-gray-500">Загрузка данных...</div>}
 
-      <div className="mb-5 flex flex-wrap items-center gap-4">
-        <EditModeButton active={isEditing} onClick={() => setIsEditing((prev) => !prev)} />
+      <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
         <input
           type="search"
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
           placeholder="Поиск по коду или названию"
-          className="ml-auto w-full max-w-sm rounded-2xl border border-slate-300 bg-white/70 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-4 focus:ring-slate-200"
+          className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white/70 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-4 focus:ring-slate-200"
         />
+        <EditModeButton active={isEditing} onClick={() => setIsEditing((prev) => !prev)} />
       </div>
 
       <div className={`${servicesGridClass} rounded-t-lg border border-gray-200 bg-gray-50/90 px-2 py-1 font-medium text-gray-600`}>
