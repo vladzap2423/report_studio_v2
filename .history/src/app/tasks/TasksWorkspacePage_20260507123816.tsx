@@ -71,7 +71,6 @@ type TaskItem = {
   signing_current_signer_name?: string | null;
   signing_current_step_order?: number | null;
   signing_participant_ids?: Array<number | string>;
-  current_assignee_transfer_actor_id?: number | null;
 };
 
 type TaskComment = {
@@ -140,10 +139,6 @@ function normalizeTaskItem(task: TaskItem): TaskItem {
     signing_current_step_order:
       task.signing_current_step_order == null ? null : Number(task.signing_current_step_order),
     signing_participant_ids: normalizeIdList(task.signing_participant_ids),
-    current_assignee_transfer_actor_id:
-      task.current_assignee_transfer_actor_id == null
-        ? null
-        : normalizeId(task.current_assignee_transfer_actor_id),
   };
 }
 
@@ -235,13 +230,6 @@ function sortTaskItems(items: TaskItem[]) {
 
     return toTimestamp(b.updated_at) - toTimestamp(a.updated_at);
   });
-}
-
-function canEditTaskPriority(task: TaskItem, user: CurrentUser | null) {
-  if (!user) return false;
-  if (task.status === "done" || task.status === "canceled") return false;
-  if (user.role === "god") return true;
-  return task.assignee_id === user.id || task.current_assignee_transfer_actor_id === user.id;
 }
 
 function sortVisibleTaskItems(items: TaskItem[], bucket: TaskBucket) {
@@ -1018,38 +1006,38 @@ export default function TasksWorkspacePage() {
   };
 
   const submitTransfer = async () => {
-  if (!transferTask) return;
+    if (!transferTask) return;
+    if (!transferAssigneeId) {
+      setError("Выберите пользователя");
+      return;
+    }
+    if (!transferComment.trim()) {
+      setError("Добавьте комментарий к передаче");
+      return;
+    }
 
-  if (!transferAssigneeId) {
-    setError("Выберите пользователя");
-    return;
-  }
-
-  setSendingTransfer(true);
-  setError("");
-  setMessage("");
-
-  try {
-    const result = await apiJson<{ task: TaskItem }>("/api/tasks/transfer", {
-      method: "POST",
-      body: JSON.stringify({
-        taskId: transferTask.id,
-        assigneeId: transferAssigneeId,
-        comment: transferComment.trim() || undefined,
-      }),
-    });
-
-    upsertTaskInState(normalizeTaskItem(result.task));
-    scheduleQueueSignalsRefresh([result.task.group_id]);
-
-    setTransferTask(null);
-    setMessage("Задача передана и возвращена в очередь");
-  } catch (err: any) {
-    setError(err?.message || "Не удалось передать задачу");
-  } finally {
-    setSendingTransfer(false);
-  }
-};
+    setSendingTransfer(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await apiJson<{ task: TaskItem }>("/api/tasks/transfer", {
+        method: "POST",
+        body: JSON.stringify({
+          taskId: transferTask.id,
+          assigneeId: transferAssigneeId,
+          comment: transferComment.trim(),
+        }),
+      });
+      upsertTaskInState(normalizeTaskItem(result.task));
+      scheduleQueueSignalsRefresh([result.task.group_id]);
+      setTransferTask(null);
+      setMessage("Задача передана и возвращена в очередь");
+    } catch (err: any) {
+      setError(err?.message || "Не удалось передать задачу");
+    } finally {
+      setSendingTransfer(false);
+    }
+  };
 
   const handleSigningSaved = useCallback(
     (payload: {
@@ -1317,7 +1305,10 @@ export default function TasksWorkspacePage() {
                             task.status === "blocked" ||
                             task.status === "review";
                           const canReturnToRework = task.status === "done";
-                          const canEditPriority = canEditTaskPriority(task, me);
+                          const canEditPriority =
+                            canManageSelectedTasks &&
+                            task.status !== "done" &&
+                            task.status !== "canceled";
                           const canSignNow =
                             task.kind === "signing" &&
                             canManageSelectedTasks &&
@@ -1778,7 +1769,7 @@ export default function TasksWorkspacePage() {
               </AppSelect>
               <input
                 value={transferComment}
-                onChange={(event) => setTransferComment(event.target.value)}
+                // onChange={(event) => setTransferComment(event.target.value)}
                 placeholder="Комментарий к передаче"
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-300 transition focus:ring-2"
               />

@@ -6,6 +6,7 @@ import { dbQuery } from "@/lib/db";
 import { requireApiRole } from "@/lib/require-api-role";
 import {
   appendTaskHistory,
+  getCurrentAssigneeTransferActorId,
   getTaskById,
   getTaskWithMetaById,
   isTaskGroupMember,
@@ -266,7 +267,8 @@ export async function GET(request: NextRequest) {
           current_step.signing_current_signer_id,
           current_step.signing_current_signer_name,
           current_step.signing_current_step_order,
-          COALESCE(signing_participants.signing_participant_ids, ARRAY[]::bigint[]) AS signing_participant_ids
+          COALESCE(signing_participants.signing_participant_ids, ARRAY[]::bigint[]) AS signing_participant_ids,
+          transfer_meta.current_assignee_transfer_actor_id
         FROM tasks t
         INNER JOIN users cu ON cu.id = t.creator_id
         LEFT JOIN users au ON au.id = t.assignee_id
@@ -301,6 +303,16 @@ export async function GET(request: NextRequest) {
           FROM task_signing_steps tss
           WHERE tss.route_id = tsr.id
         ) signing_participants ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT h.actor_id AS current_assignee_transfer_actor_id
+          FROM task_history h
+          WHERE h.task_id = t.id
+            AND h.action = 'transfer'
+            AND t.assignee_id IS NOT NULL
+            AND NULLIF(h.new_value ->> 'assignee_id', '')::bigint = t.assignee_id
+          ORDER BY h.created_at DESC, h.id DESC
+          LIMIT 1
+        ) transfer_meta ON TRUE
         WHERE ${where.join(" AND ")}
         ORDER BY
           CASE t.priority
@@ -663,6 +675,24 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: "Invalid priority" }, { status: 400 });
       }
       if (priorityRaw !== existing.priority) {
+        const currentTransferActorId = await getCurrentAssigneeTransferActorId(
+          existing.id,
+          existing.assignee_id
+        );
+        const canEditPriority =
+          existing.status !== "done" &&
+          existing.status !== "canceled" &&
+          (auth.user.role === "god" ||
+            existing.assignee_id === auth.user.id ||
+            currentTransferActorId === auth.user.id);
+
+        if (!canEditPriority) {
+          return NextResponse.json(
+            { error: "Only the assignee or the user who transferred the task can change priority" },
+            { status: 403 }
+          );
+        }
+
         oldValue.priority = existing.priority;
         newValue.priority = priorityRaw;
         values.push(priorityRaw);

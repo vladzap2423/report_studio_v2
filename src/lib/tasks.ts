@@ -91,6 +91,7 @@ export type TaskWithMetaRow = TaskRow & {
   signing_current_signer_name: string | null;
   signing_current_step_order: number | null;
   signing_participant_ids: Array<number | string>;
+  current_assignee_transfer_actor_id: number | null;
 };
 
 export async function getAccessibleTaskGroups(user: SessionUser): Promise<TaskGroupRow[]> {
@@ -229,7 +230,8 @@ export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaR
         current_step.signing_current_signer_id,
         current_step.signing_current_signer_name,
         current_step.signing_current_step_order,
-        COALESCE(signing_participants.signing_participant_ids, ARRAY[]::bigint[]) AS signing_participant_ids
+        COALESCE(signing_participants.signing_participant_ids, ARRAY[]::bigint[]) AS signing_participant_ids,
+        transfer_meta.current_assignee_transfer_actor_id
       FROM tasks t
       INNER JOIN users cu ON cu.id = t.creator_id
       LEFT JOIN users au ON au.id = t.assignee_id
@@ -264,6 +266,16 @@ export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaR
         FROM task_signing_steps tss
         WHERE tss.route_id = tsr.id
       ) signing_participants ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT h.actor_id AS current_assignee_transfer_actor_id
+        FROM task_history h
+        WHERE h.task_id = t.id
+          AND h.action = 'transfer'
+          AND t.assignee_id IS NOT NULL
+          AND NULLIF(h.new_value ->> 'assignee_id', '')::bigint = t.assignee_id
+        ORDER BY h.created_at DESC, h.id DESC
+        LIMIT 1
+      ) transfer_meta ON TRUE
       WHERE t.id = $1
       LIMIT 1
     `,
@@ -271,6 +283,32 @@ export async function getTaskWithMetaById(taskId: number): Promise<TaskWithMetaR
   );
 
   return taskRes.rows[0] || null;
+}
+
+export async function getCurrentAssigneeTransferActorId(
+  taskId: number,
+  assigneeId: number | null
+) {
+  if (!assigneeId) return null;
+
+  const transferRes = await dbQuery<{ actor_id: number | string | null }>(
+    `
+      SELECT h.actor_id
+      FROM task_history h
+      WHERE h.task_id = $1
+        AND h.action = 'transfer'
+        AND NULLIF(h.new_value ->> 'assignee_id', '')::bigint = $2
+      ORDER BY h.created_at DESC, h.id DESC
+      LIMIT 1
+    `,
+    [taskId, assigneeId]
+  );
+
+  const actorId = transferRes.rows[0]?.actor_id;
+  if (actorId == null) return null;
+
+  const normalizedActorId = Number(actorId);
+  return Number.isFinite(normalizedActorId) ? normalizedActorId : null;
 }
 
 export async function appendTaskHistory(

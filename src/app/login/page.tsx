@@ -1,8 +1,10 @@
 ﻿"use client";
 
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useToastSync } from "@/app/components/AppToastProvider";
+
+const LAST_LOGIN_STORAGE_KEY = "auth.lastUsername";
 
 function normalizeNextPath(input: string | null) {
   if (!input) return "/";
@@ -26,16 +28,39 @@ function LoginPageContent() {
     clearError: () => setError(null),
   });
 
+  useEffect(() => {
+    try {
+      const savedUsername = window.localStorage.getItem(LAST_LOGIN_STORAGE_KEY);
+      if (savedUsername) {
+        setUsername(savedUsername);
+      }
+    } catch {
+      // Ignore storage access issues and keep the login form usable.
+    }
+  }, []);
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
+    const normalizedUsername = username.trim();
+
+    try {
+      if (normalizedUsername) {
+        window.localStorage.setItem(LAST_LOGIN_STORAGE_KEY, normalizedUsername);
+      } else {
+        window.localStorage.removeItem(LAST_LOGIN_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage access issues and continue login flow.
+    }
+
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: normalizedUsername, password }),
       });
 
       if (!res.ok) {
